@@ -22,8 +22,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         Group {
             if let image = image {
                 content(Image(uiImage: image))
-            } else if isLoading {
-                placeholder()
             } else {
                 placeholder()
                     .onAppear {
@@ -35,6 +33,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     
     private func loadImage() {
         guard let url = url else { return }
+        guard !isLoading else { return }
         
         let urlString = url.absoluteString
         
@@ -44,18 +43,42 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             return
         }
         
-        // Download if not cached
         isLoading = true
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            DispatchQueue.main.async {
-                isLoading = false
-                
-                if let data = data, let downloadedImage = UIImage(data: data) {
-                    // Save to cache
-                    ImageCacheManager.shared.setImage(downloadedImage, forKey: urlString)
-                    self.image = downloadedImage
+        let config = URLSessionConfiguration.default
+        config.urlCache = URLCache.shared
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        
+        let session = URLSession(configuration: config)
+        
+        session.dataTask(with: url) { data, response, error in
+            defer {
+                DispatchQueue.main.async {
+                    isLoading = false
                 }
+            }
+            
+            guard let data = data,
+                  let downloadedImage = UIImage(data: data) else {
+                return
+            }
+            
+            // Resize image if too large to save memory
+            let maxDimension: CGFloat = 800
+            let resizedImage = downloadedImage.resized(toMaxDimension: maxDimension)
+            
+            // Compress with REDUCED quality
+            let compressedImage: UIImage
+            if let compressed = resizedImage.jpegData(compressionQuality: 0.5),  // Reduced from 0.7
+               let finalImage = UIImage(data: compressed) {
+                compressedImage = finalImage
+            } else {
+                compressedImage = resizedImage
+            }
+            
+            DispatchQueue.main.async {
+                ImageCacheManager.shared.setImage(compressedImage, forKey: urlString)
+                self.image = compressedImage
             }
         }.resume()
     }

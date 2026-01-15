@@ -11,6 +11,7 @@ struct AuthView: View {
     @State private var alertMessage = ""
     @State private var isLoading = false
     @State private var isSuccess = false
+    @State private var showingForgotPassword = false
     
     var body: some View {
         NavigationView {
@@ -44,8 +45,10 @@ struct AuthView: View {
                             .autocapitalization(.none)
                             .keyboardType(.emailAddress)
                         
-                        SecureField("Password", text: $password)
-                            .textFieldStyle(RoundedTextFieldStyle())
+                        if !showingForgotPassword {
+                            SecureField("Password", text: $password)
+                                .textFieldStyle(RoundedTextFieldStyle())
+                        }
                         
                         if !isLogin {
                             Toggle(isOn: $isBusiness) {
@@ -57,6 +60,41 @@ struct AuthView: View {
                     }
                     .padding(.horizontal)
                     
+                    // Forgot Password Link (only visible in login mode)
+                    if isLogin && !showingForgotPassword {
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                withAnimation {
+                                    showingForgotPassword = true
+                                }
+                            }) {
+                                Text("Forgot Password?")
+                                    .font(.subheadline)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.horizontal, 32)
+                        .padding(.top, -8)
+                    }
+                    
+                    // Back to Login (when in forgot password mode)
+                    if showingForgotPassword {
+                        Button(action: {
+                            withAnimation {
+                                showingForgotPassword = false
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.left")
+                                Text("Back to Login")
+                            }
+                            .font(.subheadline)
+                            .foregroundColor(.blue)
+                        }
+                        .padding(.top, -8)
+                    }
+                    
                     // Main Button
                     Button(action: handleAuth) {
                         if isLoading {
@@ -65,7 +103,7 @@ struct AuthView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding()
                         } else {
-                            Text(isLogin ? "Login" : "Sign Up")
+                            Text(showingForgotPassword ? "Send Reset Email" : (isLogin ? "Login" : "Sign Up"))
                                 .font(.headline)
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
@@ -78,24 +116,26 @@ struct AuthView: View {
                     .padding(.horizontal)
                     .padding(.top, 10)
                     
-                    // Toggle Login/Signup
-                    Button(action: {
-                        isLogin.toggle()
-                        // Clear fields when switching
-                        email = ""
-                        password = ""
-                        name = ""
-                    }) {
-                        HStack(spacing: 4) {
-                            Text(isLogin ? "Don't have an account?" : "Already have an account?")
-                                .foregroundColor(.gray)
-                            Text(isLogin ? "Sign Up" : "Login")
-                                .foregroundColor(.blue)
-                                .bold()
+                    // Toggle Login/Signup (hidden in forgot password mode)
+                    if !showingForgotPassword {
+                        Button(action: {
+                            isLogin.toggle()
+                            // Clear fields when switching
+                            email = ""
+                            password = ""
+                            name = ""
+                        }) {
+                            HStack(spacing: 4) {
+                                Text(isLogin ? "Don't have an account?" : "Already have an account?")
+                                    .foregroundColor(.gray)
+                                Text(isLogin ? "Sign Up" : "Login")
+                                    .foregroundColor(.blue)
+                                    .bold()
+                            }
                         }
+                        .disabled(isLoading)
+                        .padding(.top, 10)
                     }
-                    .disabled(isLoading)
-                    .padding(.top, 10)
                     
                     Spacer()
                 }
@@ -104,8 +144,12 @@ struct AuthView: View {
         }
         .alert(isSuccess ? "Success ✅" : "Error ❌", isPresented: $showingAlert) {
             Button("OK", role: .cancel) {
-                if isSuccess {
-                    // Success handled by authViewModel
+                if isSuccess && showingForgotPassword {
+                    // Reset to login after successful password reset
+                    withAnimation {
+                        showingForgotPassword = false
+                        email = ""
+                    }
                 }
             }
         } message: {
@@ -116,6 +160,12 @@ struct AuthView: View {
     func handleAuth() {
         // Reset success state
         isSuccess = false
+        
+        // Handle Forgot Password
+        if showingForgotPassword {
+            handleForgotPassword()
+            return
+        }
         
         // Validation
         if email.isEmpty {
@@ -180,6 +230,17 @@ struct AuthView: View {
             }
         }
     }
+    
+    func handleForgotPassword() {
+        isLoading = true
+        
+        authViewModel.resetPassword(email: email.trimmingCharacters(in: .whitespaces)) { success, message in
+            isLoading = false
+            isSuccess = success
+            alertMessage = message
+            showingAlert = true
+        }
+    }
 }
 
 struct RoundedTextFieldStyle: TextFieldStyle {
@@ -190,4 +251,3 @@ struct RoundedTextFieldStyle: TextFieldStyle {
             .cornerRadius(10)
     }
 }
-

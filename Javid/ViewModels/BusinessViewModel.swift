@@ -13,18 +13,100 @@ class BusinessViewModel: ObservableObject {
     
     private let db = Firestore.firestore()
     private var lastDocument: DocumentSnapshot?
-    private let pageSize = 20
+    private let pageSize = 5  // REDUCED from 10 for better performance
     
     // Location properties for "Near Me" feature
     @Published var sortByDistance = false
     var userLocation: CLLocation?
     
+    // Cache
+    private var businessesCache: [Business] = []
+    private var cacheTimestamp: Date?
+    private let cacheValidDuration: TimeInterval = 300 // 5 minutes
+    
+    // Listener
+    private var businessesListener: ListenerRegistration?
+    
     init() {
-        fetchBusinesses()
+        setupRealtimeListener()
     }
     
-    // Fetch first page
+    deinit {
+        businessesListener?.remove()
+    }
+    
+    // Real-time listener for better performance
+    private func setupRealtimeListener() {
+        guard !isLoading else { return }
+        
+        isLoading = true
+        
+        businessesListener = db.collection("businesses")
+            .order(by: "name")
+            .limit(to: pageSize)
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self = self else { return }
+                
+                self.isLoading = false
+                
+                if let error = error {
+                    print("❌ Firebase Error: \(error.localizedDescription)")
+                    self.errorMessage = "Failed to load businesses: \(error.localizedDescription)"
+                    
+                    // Don't crash - handle gracefully
+                    self.businesses = []
+                    self.hasMoreData = false
+                    return
+                }
+                
+                guard let documents = snapshot?.documents else {
+                    print("No businesses found")
+                    self.hasMoreData = false
+                    return
+                }
+                
+                // Update only changes, not everything
+                snapshot?.documentChanges.forEach { change in
+                    do {
+                        let business = try change.document.data(as: Business.self)
+                        switch change.type {
+                        case .added:
+                            if !self.businesses.contains(where: { $0.id == business.id }) {
+                                self.businesses.append(business)
+                            }
+                        case .modified:
+                            if let index = self.businesses.firstIndex(where: { $0.id == business.id }) {
+                                self.businesses[index] = business
+                            }
+                        case .removed:
+                            self.businesses.removeAll { $0.id == business.id }
+                        }
+                    } catch {
+                        print("❌ Error decoding business: \(error)")
+                    }
+                }
+                
+                self.lastDocument = documents.last
+                self.hasMoreData = documents.count == self.pageSize
+                
+                // Sort by name
+                self.businesses.sort { $0.name < $1.name }
+                
+                print("✅ Loaded \(self.businesses.count) businesses")
+            }
+    }
+    
+    // Fetch first page (fallback if listener doesn't work)
     func fetchBusinesses() {
+        // Check cache first
+        if let cacheTimestamp = cacheTimestamp,
+           Date().timeIntervalSince(cacheTimestamp) < cacheValidDuration,
+           !businessesCache.isEmpty {
+            self.businesses = businessesCache
+            print("✅ Loaded from cache: \(businesses.count) businesses")
+            return
+        }
+        
         guard !isLoading else { return }
         
         isLoading = true
@@ -52,10 +134,14 @@ class BusinessViewModel: ObservableObject {
                     try? doc.data(as: Business.self)
                 }
                 
+                // Update cache
+                self?.businessesCache = self?.businesses ?? []
+                self?.cacheTimestamp = Date()
+                
                 self?.lastDocument = documents.last
                 self?.hasMoreData = documents.count == self?.pageSize
                 
-                print("âœ… Loaded \(self?.businesses.count ?? 0) businesses")
+                print("✅ Loaded \(self?.businesses.count ?? 0) businesses")
             }
     }
     
@@ -92,19 +178,33 @@ class BusinessViewModel: ObservableObject {
                 }
                 
                 self?.businesses.append(contentsOf: newBusinesses)
+                
+                // Update cache
+                self?.businessesCache = self?.businesses ?? []
+                self?.cacheTimestamp = Date()
+                
                 self?.lastDocument = documents.last
                 self?.hasMoreData = documents.count == self?.pageSize
                 
-                print("âœ… Loaded \(newBusinesses.count) more businesses. Total: \(self?.businesses.count ?? 0)")
+                print("✅ Loaded \(newBusinesses.count) more businesses. Total: \(self?.businesses.count ?? 0)")
             }
     }
     
     // Refresh (pull to refresh)
     func refreshBusinesses() {
+        // Clear cache
+        businessesCache = []
+        cacheTimestamp = nil
+        
         businesses = []
         lastDocument = nil
         hasMoreData = true
-        fetchBusinesses()
+        
+        // Remove old listener
+        businessesListener?.remove()
+        
+        // Setup new listener
+        setupRealtimeListener()
     }
     
     // Add a new business to Firestore
@@ -122,9 +222,8 @@ class BusinessViewModel: ObservableObject {
                 if let error = error {
                     completion(false, "Failed to add business: \(error.localizedDescription)")
                 } else {
-                    // Add to local list
-                    self.businesses.insert(newBusiness, at: 0)
-                    completion(true, "âœ… Business added successfully!")
+                    // Listener will automatically update the list
+                    completion(true, "✅ Business added successfully!")
                 }
             }
         } catch {
@@ -144,11 +243,8 @@ class BusinessViewModel: ObservableObject {
                 if let error = error {
                     completion(false, "Failed to update business: \(error.localizedDescription)")
                 } else {
-                    // Update local list
-                    if let index = self.businesses.firstIndex(where: { $0.id == businessId }) {
-                        self.businesses[index] = business
-                    }
-                    completion(true, "âœ… Business updated successfully!")
+                    // Listener will automatically update the list
+                    completion(true, "✅ Business updated successfully!")
                 }
             }
         } catch {
@@ -187,9 +283,8 @@ class BusinessViewModel: ObservableObject {
                 if let error = error {
                     completion(false, "Failed to delete business: \(error.localizedDescription)")
                 } else {
-                    // Remove from local list
-                    self.businesses.removeAll { $0.id == businessId }
-                    completion(true, "âœ… Business deleted successfully!")
+                    // Listener will automatically update the list
+                    completion(true, "✅ Business deleted successfully!")
                 }
             }
         }
@@ -208,10 +303,10 @@ class BusinessViewModel: ObservableObject {
         CloudinaryManager.shared.uploadImage(image) { result in
             switch result {
             case .success(let url):
-                print("âœ… Image uploaded: \(url)")
+                print("✅ Image uploaded: \(url)")
                 completion(url)
             case .failure(let error):
-                print("âŒ Upload failed: \(error.localizedDescription)")
+                print("❌ Upload failed: \(error.localizedDescription)")
                 completion(nil)
             }
         }
@@ -221,6 +316,7 @@ class BusinessViewModel: ObservableObject {
     func deleteImage(url: String, completion: @escaping (Bool) -> Void) {
         CloudinaryManager.shared.deleteImage(url: url, completion: completion)
     }
+    
     // Sort businesses by distance from user location
     func sortBusinessesByDistance(userLocation: CLLocation) {
         self.userLocation = userLocation

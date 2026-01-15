@@ -3,6 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @StateObject private var businessViewModel = BusinessViewModel()
+    @StateObject private var favoriteViewModel = FavoriteViewModel()
     
     var body: some View {
         TabView {
@@ -11,6 +12,15 @@ struct MainTabView: View {
                     Label("Home", systemImage: "house.fill")
                 }
             
+            SearchView(businessViewModel: businessViewModel)
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+            MarketplaceView()
+                .environmentObject(authViewModel)
+                .tabItem {
+                    Label("Marketplace", systemImage: "cart")
+                }
             ProfileView(authViewModel: authViewModel, businessViewModel: businessViewModel)
                 .tabItem {
                     Label("Profile", systemImage: "person.fill")
@@ -18,5 +28,6 @@ struct MainTabView: View {
         }
         .environmentObject(businessViewModel)
         .environmentObject(authViewModel)
+        .environmentObject(favoriteViewModel)  
     }
 }

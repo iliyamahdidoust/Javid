@@ -9,14 +9,23 @@ class ReviewViewModel: ObservableObject {
     @Published var errorMessage = ""
     
     private let db = Firestore.firestore()
+    private var reviewsListener: ListenerRegistration?
     
-    // Fetch reviews for a specific business
+    deinit {
+        reviewsListener?.remove()
+    }
+    
+    // Fetch reviews for a specific business with real-time listener
     func fetchReviews(for businessId: String) {
+        // Remove old listener
+        reviewsListener?.remove()
+        
         isLoading = true
         
-        db.collection("reviews")
+        reviewsListener = db.collection("reviews")
             .whereField("businessId", isEqualTo: businessId)
             .order(by: "createdAt", descending: true)
+            .limit(to: 20) // Limit to 20 reviews for performance
             .addSnapshotListener { [weak self] snapshot, error in
                 self?.isLoading = false
                 
@@ -38,11 +47,15 @@ class ReviewViewModel: ObservableObject {
                 print("✅ Loaded \(self?.reviews.count ?? 0) reviews")
             }
     }
+    
     // Fetch user reviews (for profile view)
     func fetchUserReviews(userId: String) {
-        db.collection("reviews")
+        reviewsListener?.remove()
+        
+        reviewsListener = db.collection("reviews")
             .whereField("userId", isEqualTo: userId)
             .order(by: "createdAt", descending: true)
+            .limit(to: 50) // Limit user reviews
             .addSnapshotListener { [weak self] snapshot, error in
                 if let error = error {
                     print("Error fetching user reviews: \(error)")
@@ -53,7 +66,7 @@ class ReviewViewModel: ObservableObject {
                     try? doc.data(as: Review.self)
                 } ?? []
             }
-        }
+    }
     
     // Add a new review
     func addReview(_ review: Review, completion: @escaping (Bool, String) -> Void) {
@@ -84,9 +97,14 @@ class ReviewViewModel: ObservableObject {
                             if let error = error {
                                 completion(false, "Failed to add review: \(error.localizedDescription)")
                             } else {
-                                // Update business rating
-                                self?.updateBusinessRating(businessId: review.businessId)
-                                completion(true, "✅ Review added successfully!")
+                                // Update business rating immediately (not in background)
+                                self?.updateBusinessRating(businessId: review.businessId) { success in
+                                    if success {
+                                        completion(true, "✅ Review added successfully!")
+                                    } else {
+                                        completion(true, "✅ Review added but rating update delayed")
+                                    }
+                                }
                             }
                         }
                     } catch {
@@ -108,8 +126,14 @@ class ReviewViewModel: ObservableObject {
                 if let error = error {
                     completion(false, "Failed to update review: \(error.localizedDescription)")
                 } else {
-                    self.updateBusinessRating(businessId: review.businessId)
-                    completion(true, "✅ Review updated successfully!")
+                    // Update business rating immediately
+                    self.updateBusinessRating(businessId: review.businessId) { success in
+                        if success {
+                            completion(true, "✅ Review updated successfully!")
+                        } else {
+                            completion(true, "✅ Review updated but rating update delayed")
+                        }
+                    }
                 }
             }
         } catch {
@@ -129,7 +153,6 @@ class ReviewViewModel: ObservableObject {
             return
         }
         
-        // Check if user owns this review
         guard review.userId == userId else {
             completion(false, "You can only delete your own reviews")
             return
@@ -139,41 +162,48 @@ class ReviewViewModel: ObservableObject {
             if let error = error {
                 completion(false, "Failed to delete review: \(error.localizedDescription)")
             } else {
-                self.updateBusinessRating(businessId: review.businessId)
-                completion(true, "✅ Review deleted successfully!")
+                // Update business rating immediately
+                self.updateBusinessRating(businessId: review.businessId) { success in
+                    if success {
+                        completion(true, "✅ Review deleted successfully!")
+                    } else {
+                        completion(true, "✅ Review deleted but rating update delayed")
+                    }
+                }
             }
         }
     }
     
-    // Update business rating based on reviews
-    private func updateBusinessRating(businessId: String) {
+    // Update business rating based on reviews (synchronous with completion)
+    private func updateBusinessRating(businessId: String, completion: @escaping (Bool) -> Void) {
         db.collection("reviews")
             .whereField("businessId", isEqualTo: businessId)
             .getDocuments { [weak self] snapshot, error in
                 if let error = error {
-                    print("Error calculating rating: \(error)")
+                    print("❌ Error fetching reviews for rating update: \(error)")
+                    completion(false)
                     return
                 }
                 
-                guard let documents = snapshot?.documents else { return }
-                
-                let reviews = documents.compactMap { doc -> Review? in
+                let reviews = snapshot?.documents.compactMap { doc -> Review? in
                     try? doc.data(as: Review.self)
-                }
+                } ?? []
                 
                 let totalRating = reviews.reduce(0.0) { $0 + $1.rating }
                 let averageRating = reviews.isEmpty ? 0.0 : totalRating / Double(reviews.count)
                 let reviewCount = reviews.count
                 
-                // Update business
+                // Update business document
                 self?.db.collection("businesses").document(businessId).updateData([
                     "rating": averageRating,
                     "reviewCount": reviewCount
                 ]) { error in
                     if let error = error {
-                        print("Error updating business rating: \(error)")
+                        print("❌ Error updating business rating: \(error)")
+                        completion(false)
                     } else {
-                        print("✅ Business rating updated: \(averageRating) (\(reviewCount) reviews)")
+                        print("✅ Business rating updated: \(String(format: "%.1f", averageRating)) (\(reviewCount) reviews)")
+                        completion(true)
                     }
                 }
             }
@@ -199,23 +229,10 @@ class ReviewViewModel: ObservableObject {
         }
     }
     
-    // Get user's reviews
-    func fetchUserReviews(userId: String, completion: @escaping ([Review]) -> Void) {
-        db.collection("reviews")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "createdAt", descending: true)
-            .getDocuments { snapshot, error in
-                if let error = error {
-                    print("Error fetching user reviews: \(error)")
-                    completion([])
-                    return
-                }
-                
-                let reviews = snapshot?.documents.compactMap { doc -> Review? in
-                    try? doc.data(as: Review.self)
-                } ?? []
-                
-                completion(reviews)
-            }
+    // Get live rating and count for a business
+    func getLiveRating() -> (rating: Double, count: Int) {
+        guard !reviews.isEmpty else { return (0.0, 0) }
+        let total = reviews.reduce(0.0) { $0 + $1.rating }
+        return (total / Double(reviews.count), reviews.count)
     }
 }

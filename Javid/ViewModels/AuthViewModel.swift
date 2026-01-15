@@ -95,6 +95,28 @@ class AuthViewModel: ObservableObject {
         }
     }
     
+    // NEW: Reset password function
+    func resetPassword(email: String, completion: @escaping (Bool, String) -> Void) {
+        guard !email.isEmpty else {
+            completion(false, "❌ Please enter your email address")
+            return
+        }
+        
+        guard email.contains("@") && email.contains(".") else {
+            completion(false, "❌ Please enter a valid email address")
+            return
+        }
+        
+        Auth.auth().sendPasswordReset(withEmail: email.trimmingCharacters(in: .whitespaces)) { error in
+            if let error = error as NSError? {
+                let errorMessage = self.getReadableError(error: error, isSignUp: false)
+                completion(false, errorMessage)
+            } else {
+                completion(true, "✅ Password reset email sent! Please check your inbox.")
+            }
+        }
+    }
+    
     // Save user profile to Firestore
     private func saveUserProfile(_ profile: UserProfile, completion: @escaping (Bool, String) -> Void) {
         do {

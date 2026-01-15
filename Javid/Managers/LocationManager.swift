@@ -9,10 +9,14 @@ class LocationManager: NSObject, ObservableObject {
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
     @Published var locationError: String?
     
+    private var lastUpdateTime: Date?
+    private let updateInterval: TimeInterval = 10 // Only update every 10 seconds
+    
     override init() {
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters // Less accurate but faster
+        locationManager.distanceFilter = 100 // Only update if moved 100 meters
     }
     
     func requestPermission() {
@@ -49,7 +53,16 @@ extension LocationManager: CLLocationManagerDelegate {
     }
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        location = locations.last
+        guard let newLocation = locations.last else { return }
+        
+        // Throttle updates
+        if let lastUpdate = lastUpdateTime,
+           Date().timeIntervalSince(lastUpdate) < updateInterval {
+            return
+        }
+        
+        location = newLocation
+        lastUpdateTime = Date()
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

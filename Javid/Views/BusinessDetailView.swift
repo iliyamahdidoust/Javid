@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import FirebaseAuth
+import FirebaseFirestore
 
 struct BusinessDetailView: View {
     let business: Business
@@ -18,6 +19,7 @@ struct BusinessDetailView: View {
     
     @EnvironmentObject var businessViewModel: BusinessViewModel
     @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var favoriteViewModel: FavoriteViewModel
     @StateObject private var reviewViewModel = ReviewViewModel()
     
     var isOwner: Bool {
@@ -25,6 +27,12 @@ struct BusinessDetailView: View {
             return false
         }
         return business.ownerId == currentUserId
+    }
+    
+    // Check if this business is favorited
+    var isFavorite: Bool {
+        guard let businessId = business.id else { return false }
+        return favoriteViewModel.isFavorite(businessId: businessId)
     }
     
     init(business: Business) {
@@ -105,6 +113,7 @@ struct BusinessDetailView: View {
             .padding(.leading, AppSpacing.md)
         }
         .navigationBarHidden(true)
+        .enableSwipeBack()
         .sheet(isPresented: $showingWorkHoursEditor) {
             WorkHoursEditorView(business: business, businessViewModel: businessViewModel)
         }
@@ -159,7 +168,7 @@ struct BusinessDetailView: View {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 16))
                                 .foregroundColor(AppColors.starYellow)
-                            Text(String(format: "%.1f", business.rating))
+                            Text(String(format: "%.1f", calculateAverageRating()))  // ✅ Live calculation
                                 .font(AppFonts.bodyBold)
                                 .foregroundColor(AppColors.textPrimary)
                         }
@@ -167,7 +176,7 @@ struct BusinessDetailView: View {
                         Text("•")
                             .foregroundColor(AppColors.textTertiary)
                         
-                        Text("\(business.reviewCount) reviews")
+                        Text("\(reviewViewModel.reviews.count) reviews")  // ✅ Live count
                             .font(AppFonts.callout)
                             .foregroundColor(AppColors.textSecondary)
                     }
@@ -236,11 +245,11 @@ struct BusinessDetailView: View {
             }
             
             ActionButton(
-                icon: "heart",
-                title: "Save",
+                icon: isFavorite ? "heart.fill" : "heart",
+                title: isFavorite ? "Saved" : "Save",
                 color: AppColors.error
             ) {
-                // TODO: Add to favorites
+                toggleFavorite()
             }
         }
         .padding(.horizontal, AppSpacing.md)
@@ -403,7 +412,7 @@ struct BusinessDetailView: View {
     var reviewsSection: some View {
         VStack(spacing: AppSpacing.sm) {
             SectionHeader(
-                title: "Reviews (\(business.reviewCount))",
+                title: "Reviews (\(reviewViewModel.reviews.count))",
                 icon: "star.fill",
                 actionTitle: reviewViewModel.reviews.count > 3 ? "See All" : nil
             ) {
@@ -431,7 +440,7 @@ struct BusinessDetailView: View {
             } else {
                 VStack(spacing: AppSpacing.sm) {
                     ForEach(reviewViewModel.reviews.prefix(3)) { review in
-                        SimpleReviewCard(review: review)
+                        ModernReviewCard(review: review, userName: review.userName)
                     }
                 }
                 .padding(.horizontal, AppSpacing.md)
@@ -464,6 +473,12 @@ struct BusinessDetailView: View {
     }
     
     // MARK: - Helper Functions
+    
+    func calculateAverageRating() -> Double {
+        guard !reviewViewModel.reviews.isEmpty else { return 0.0 }
+        let total = reviewViewModel.reviews.reduce(0.0) { $0 + $1.rating }
+        return total / Double(reviewViewModel.reviews.count)
+    }
     
     func deleteBusiness() {
         businessViewModel.deleteBusiness(business) { success, message in
@@ -523,64 +538,27 @@ struct BusinessDetailView: View {
         }
     }
     
-    // MARK: - Simple Review Card
-    struct SimpleReviewCard: View {
-        let review: Review
-        @Environment(\.colorScheme) var colorScheme
+    // Toggle favorite (add or remove)
+    func toggleFavorite() {
+        guard let businessId = business.id else {
+            print("❌ Business ID missing")
+            return
+        }
         
-        var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header
-                HStack(spacing: 12) {
-                    // Avatar
-                    ZStack {
-                        Circle()
-                            .fill(AppColors.primary.opacity(0.15))
-                            .frame(width: 44, height: 44)
-                        
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(AppColors.primary)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("User")
-                            .font(AppFonts.bodyBold)
-                            .foregroundColor(AppColors.textPrimary)
-                        
-                        HStack(spacing: 4) {
-                            ForEach(0..<5) { index in
-                                Image(systemName: index < Int(review.rating) ? "star.fill" : "star")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(index < Int(review.rating) ? AppColors.starYellow : AppColors.textTertiary)
-                            }
-                            
-                            Text("•")
-                                .foregroundColor(AppColors.textTertiary)
-                                .font(AppFonts.caption)
-                            
-                            Text(review.createdAt.timeAgo())
-                                .font(AppFonts.caption)
-                                .foregroundColor(AppColors.textSecondary)
-                        }
-                    }
-                    
-                    Spacer()
-                }
-                
-                // Review Text
-                Text(review.comment)
-                    .font(AppFonts.callout)
-                    .foregroundColor(AppColors.textSecondary)
-                    .lineLimit(4)
+        guard Auth.auth().currentUser != nil else {
+            print("⚠️ User not logged in")
+            alertMessage = "Please login to save favorites"
+            showingAlert = true
+            return
+        }
+        
+        print("🔵 Toggle favorite tapped for business: \(businessId)")
+        
+        favoriteViewModel.toggleFavorite(businessId: businessId) { success, message in
+            if !success {
+                self.alertMessage = message
+                self.showingAlert = true
             }
-            .padding(AppSpacing.md)
-            .background(AppColors.surface)
-            .cornerRadius(AppRadius.md)
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md)
-                    .stroke(colorScheme == .dark ? AppColors.border.opacity(0.2) : Color.clear, lineWidth: 1)
-            )
         }
     }
 }

@@ -1,10 +1,21 @@
 import SwiftUI
+import FirebaseFirestore
 
 struct ModernBusinessCard: View {
     let business: Business
     var distance: Double?
+    
     @State private var appeared = false
+    @State private var liveRating: Double
+    @State private var liveReviewCount: Int
     @Environment(\.colorScheme) var colorScheme
+    
+    init(business: Business, distance: Double? = nil) {
+        self.business = business
+        self.distance = distance
+        _liveRating = State(initialValue: business.rating)
+        _liveReviewCount = State(initialValue: business.reviewCount)
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,13 +26,14 @@ struct ModernBusinessCard: View {
                     CachedAsyncImage(url: url) { image in
                         image
                             .resizable()
-                            .scaledToFill()
+                            .aspectRatio(contentMode: .fill)
                             .frame(height: 180)
                             .clipped()
                     } placeholder: {
                         ZStack {
                             AppColors.surface
                             ProgressView()
+                                .scaleEffect(0.8)
                         }
                         .frame(height: 180)
                     }
@@ -65,10 +77,10 @@ struct ModernBusinessCard: View {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 12))
                                 .foregroundColor(AppColors.starYellow)
-                            Text(String(format: "%.1f", business.rating))
+                            Text(String(format: "%.1f", liveRating))
                                 .font(AppFonts.caption)
                                 .foregroundColor(AppColors.textSecondary)
-                            Text("(\(business.reviewCount))")
+                            Text("(\(liveReviewCount))")
                                 .font(AppFonts.caption)
                                 .foregroundColor(AppColors.textTertiary)
                         }
@@ -121,9 +133,43 @@ struct ModernBusinessCard: View {
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 20)
         .onAppear {
-            withAnimation(.easeOut(duration: 0.4)) {
+            withAnimation(.easeOut(duration: 0.3)) {
                 appeared = true
             }
+            fetchLiveRating()
         }
+        .onChange(of: business.rating) { newRating in
+            liveRating = newRating
+        }
+        .onChange(of: business.reviewCount) { newCount in
+            liveReviewCount = newCount
+        }
+    }
+    
+    // Fetch live rating from Firestore
+    private func fetchLiveRating() {
+        guard let businessId = business.id else { return }
+        
+        let db = Firestore.firestore()
+        db.collection("reviews")
+            .whereField("businessId", isEqualTo: businessId)
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    print("Error fetching reviews: \(error)")
+                    return
+                }
+                
+                let reviews = snapshot?.documents.compactMap { doc -> Review? in
+                    try? doc.data(as: Review.self)
+                } ?? []
+                
+                if !reviews.isEmpty {
+                    let total = reviews.reduce(0.0) { $0 + $1.rating }
+                    DispatchQueue.main.async {
+                        self.liveRating = total / Double(reviews.count)
+                        self.liveReviewCount = reviews.count
+                    }
+                }
+            }
     }
 }

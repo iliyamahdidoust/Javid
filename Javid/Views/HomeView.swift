@@ -3,8 +3,8 @@ import CoreLocation
 
 struct HomeView: View {
     @ObservedObject var businessViewModel: BusinessViewModel
+    @EnvironmentObject var favoriteViewModel: FavoriteViewModel  // ✅ Added this
     @StateObject private var locationManager = LocationManager()
-    @State private var searchText = ""
     @State private var selectedCategory = "All"
     @State private var isRefreshing = false
     @State private var showingLocationPermission = false
@@ -16,11 +16,8 @@ struct HomeView: View {
     
     var filteredBusinesses: [Business] {
         businessViewModel.businesses.filter { business in
-            let matchesSearch = searchText.isEmpty ||
-                business.name.localizedCaseInsensitiveContains(searchText) ||
-                business.city.localizedCaseInsensitiveContains(searchText)
             let matchesCategory = selectedCategory == "All" || business.category == selectedCategory
-            return matchesSearch && matchesCategory
+            return matchesCategory
         }
     }
     
@@ -45,36 +42,12 @@ struct HomeView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                // Background
                 AppColors.background
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
                     // Header Section
                     VStack(spacing: AppSpacing.md) {
-                        // Title
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Discover")
-                                    .font(AppFonts.largeTitle)
-                                    .foregroundColor(AppColors.textPrimary)
-                                
-                                Text("Iranian Businesses Near You")
-                                    .font(AppFonts.callout)
-                                    .foregroundColor(AppColors.textSecondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, AppSpacing.md)
-                        .padding(.top, AppSpacing.sm)
-                        
-                        // Search Bar
-                        ModernSearchBar(text: $searchText, placeholder: "Search businesses or city...")
-                            .padding(.horizontal, AppSpacing.md)
-                        
-                        // Near Me Button
-                        nearMeSection
-                        
                         // Categories
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
@@ -92,6 +65,10 @@ struct HomeView: View {
                             }
                             .padding(.horizontal, AppSpacing.md)
                         }
+                        .padding(.top, AppSpacing.md)
+                        
+                        // Near Me Button
+                        nearMeSection
                     }
                     .padding(.bottom, AppSpacing.md)
                     .background(AppColors.surface)
@@ -119,8 +96,8 @@ struct HomeView: View {
                                     .font(AppFonts.title2)
                                     .foregroundColor(AppColors.textPrimary)
                                 
-                                if !searchText.isEmpty || selectedCategory != "All" {
-                                    Text("Try adjusting your search or filters")
+                                if selectedCategory != "All" {
+                                    Text("Try selecting a different category")
                                         .font(AppFonts.callout)
                                         .foregroundColor(AppColors.textSecondary)
                                 }
@@ -201,16 +178,13 @@ struct HomeView: View {
                 Text("Please enable location access in Settings to use the Near Me feature.")
             }
             .onAppear {
-                print("🏠 HomeView appeared")
                 requestLocationIfNeeded()
             }
             .onChange(of: locationManager.authorizationStatus) { newStatus in
-                print("📍 Authorization status changed to: \(newStatus.rawValue)")
                 handleAuthorizationChange(newStatus)
             }
             .onChange(of: locationManager.location) { newLocation in
                 if let location = newLocation {
-                    print("📍 Location updated: \(location.coordinate.latitude), \(location.coordinate.longitude)")
                     if businessViewModel.sortByDistance {
                         businessViewModel.sortBusinessesByDistance(userLocation: location)
                     }
@@ -279,7 +253,6 @@ struct HomeView: View {
                 .padding(.horizontal, AppSpacing.md)
             } else if locationManager.authorizationStatus == .notDetermined {
                 Button(action: {
-                    print("🔵 Requesting location permission...")
                     locationManager.requestPermission()
                 }) {
                     HStack(spacing: 8) {
@@ -329,14 +302,10 @@ struct HomeView: View {
     // MARK: - Helper Functions
     
     func requestLocationIfNeeded() {
-        print("🔍 Checking location authorization status: \(locationManager.authorizationStatus.rawValue)")
-        
         if locationManager.authorizationStatus == .notDetermined {
-            print("🔵 Location not determined, requesting permission...")
             locationManager.requestPermission()
         } else if locationManager.authorizationStatus == .authorizedWhenInUse ||
                   locationManager.authorizationStatus == .authorizedAlways {
-            print("✅ Location authorized, starting updates...")
             locationManager.startUpdating()
         }
     }
@@ -344,15 +313,13 @@ struct HomeView: View {
     func handleAuthorizationChange(_ status: CLAuthorizationStatus) {
         switch status {
         case .authorizedWhenInUse, .authorizedAlways:
-            print("✅ Location authorized, starting updates...")
             locationManager.startUpdating()
         case .denied, .restricted:
-            print("❌ Location denied or restricted")
             businessViewModel.sortByDistance = false
         case .notDetermined:
-            print("⚪ Location not determined")
+            break
         @unknown default:
-            print("❓ Unknown authorization status")
+            break
         }
     }
     
@@ -369,37 +336,26 @@ struct HomeView: View {
     }
     
     func toggleNearMe() {
-        print("🔄 Toggle Near Me tapped")
-        
         guard locationManager.authorizationStatus == .authorizedWhenInUse ||
               locationManager.authorizationStatus == .authorizedAlways else {
-            print("❌ Location not authorized")
             showingLocationPermission = true
             return
         }
         
         if businessViewModel.sortByDistance {
-            // Turn off Near Me
-            print("🔴 Turning OFF Near Me")
             businessViewModel.sortByDistance = false
         } else {
-            // Turn on Near Me
-            print("🟢 Turning ON Near Me")
-            
             if let location = locationManager.location {
-                print("✅ Location available: \(location.coordinate.latitude), \(location.coordinate.longitude)")
                 businessViewModel.sortByDistance = true
                 businessViewModel.sortBusinessesByDistance(userLocation: location)
             } else {
-                print("⏳ Waiting for location...")
                 isLocationLoading = true
                 locationManager.startUpdating()
                 
-                // Wait for location with timeout
                 Task {
                     var attempts = 0
                     while locationManager.location == nil && attempts < 20 {
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                        try? await Task.sleep(nanoseconds: 500_000_000)
                         attempts += 1
                     }
                     
@@ -407,11 +363,9 @@ struct HomeView: View {
                         isLocationLoading = false
                         
                         if let location = locationManager.location {
-                            print("✅ Location received: \(location.coordinate.latitude), \(location.coordinate.longitude)")
                             businessViewModel.sortByDistance = true
                             businessViewModel.sortBusinessesByDistance(userLocation: location)
                         } else {
-                            print("❌ Failed to get location after timeout")
                             showingLocationPermission = true
                         }
                     }
@@ -441,7 +395,6 @@ struct SkeletonBusinessCard: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Image skeleton
             Rectangle()
                 .fill(AppColors.surface.opacity(0.5))
                 .frame(height: 180)
@@ -458,13 +411,11 @@ struct SkeletonBusinessCard: View {
                 )
             
             VStack(alignment: .leading, spacing: 12) {
-                // Title skeleton
                 Rectangle()
                     .fill(AppColors.surface.opacity(0.5))
                     .frame(width: 200, height: 20)
                     .cornerRadius(4)
                 
-                // Description skeleton
                 VStack(spacing: 6) {
                     Rectangle()
                         .fill(AppColors.surface.opacity(0.5))
@@ -477,7 +428,6 @@ struct SkeletonBusinessCard: View {
                         .cornerRadius(4)
                 }
                 
-                // Location skeleton
                 Rectangle()
                     .fill(AppColors.surface.opacity(0.5))
                     .frame(width: 150, height: 12)
