@@ -11,6 +11,7 @@ struct AddMarketplaceItemView: View {
     @State private var price = ""
     @State private var category: MarketplaceCategory = .electronics
     @State private var condition: ItemCondition = .good
+    @State private var city = ""
     @State private var location = ""
     @State private var selectedImages: [UIImage] = []
     @State private var showingImagePicker = false
@@ -58,8 +59,10 @@ struct AddMarketplaceItemView: View {
                 
                 // Location Section
                 Section(header: Text("Location")) {
+                    TextField("City", text: $city)
+                    
                     HStack {
-                        TextField("City/Area (e.g., Tehran, Downtown)", text: $location)
+                        TextField("Area/Neighborhood", text: $location)
                         
                         if isGeocoding {
                             ProgressView()
@@ -141,7 +144,7 @@ struct AddMarketplaceItemView: View {
                     Button("List") {
                         listItem()
                     }
-                    .disabled(isUploading || title.isEmpty || description.isEmpty || price.isEmpty || location.isEmpty)
+                    .disabled(isUploading || title.isEmpty || description.isEmpty || price.isEmpty || city.isEmpty || location.isEmpty)
                 }
             }
             .sheet(isPresented: $showingImagePicker) {
@@ -178,6 +181,17 @@ struct AddMarketplaceItemView: View {
                 // Reset geocoded coordinate when location changes
                 geocodedCoordinate = nil
             }
+            .onChange(of: city) { newValue in
+                // Reset geocoded coordinate when city changes
+                geocodedCoordinate = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            print("⚠️ Memory warning received - clearing selected images")
+            // Don't clear images while uploading
+            if !isUploading {
+                selectedImages.removeAll()
+            }
         }
     }
     
@@ -203,8 +217,14 @@ struct AddMarketplaceItemView: View {
             return
         }
         
+        guard !city.isEmpty else {
+            alertMessage = "❌ Please enter city"
+            showingAlert = true
+            return
+        }
+        
         guard !location.isEmpty else {
-            alertMessage = "❌ Please enter location"
+            alertMessage = "❌ Please enter area/neighborhood"
             showingAlert = true
             return
         }
@@ -230,8 +250,9 @@ struct AddMarketplaceItemView: View {
     // MARK: - Geocode Location
     
     func geocodeLocation() {
+        let fullAddress = "\(location), \(city)"
         let geocoder = CLGeocoder()
-        geocoder.geocodeAddressString(location) { placemarks, error in
+        geocoder.geocodeAddressString(fullAddress) { placemarks, error in
             isGeocoding = false
             
             if let error = error {
@@ -243,7 +264,7 @@ struct AddMarketplaceItemView: View {
             
             if let coordinate = placemarks?.first?.location?.coordinate {
                 geocodedCoordinate = coordinate
-                print("✅ Geocoded: \(location) -> (\(coordinate.latitude), \(coordinate.longitude))")
+                print("✅ Geocoded: \(fullAddress) -> (\(coordinate.latitude), \(coordinate.longitude))")
                 uploadAndList()
             } else {
                 alertMessage = "Could not find location. Please be more specific."
@@ -277,43 +298,72 @@ struct AddMarketplaceItemView: View {
         
         isUploading = true
         
-        // Upload images first
-        let group = DispatchGroup()
+        // MEMORY FIX: Upload images ONE AT A TIME instead of all at once
         var uploadedURLs: [String] = []
         
-        for image in selectedImages {
-            group.enter()
+        func uploadNextImage(index: Int) {
+            guard index < selectedImages.count else {
+                // All images uploaded, create item
+                createMarketplaceItem(urls: uploadedURLs)
+                return
+            }
+            
+            let image = selectedImages[index]
+            
             marketplaceViewModel.uploadImage(image) { url in
                 if let url = url {
                     uploadedURLs.append(url)
                 }
-                group.leave()
+                
+                // Upload next image
+                uploadNextImage(index: index + 1)
             }
         }
         
-        group.notify(queue: .main) {
-            // Create item
-            let item = MarketplaceItem(
-                title: self.title,
-                description: self.description,
-                price: priceValue,
-                category: self.category,
-                condition: self.condition,
-                photoURLs: uploadedURLs,
-                sellerId: user.uid,
-                sellerName: userName,
-                sellerEmail: userEmail,
-                location: self.location,
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude
-            )
-            
-            // Add to Firestore
-            self.marketplaceViewModel.addItem(item) { success, message in
-                self.isUploading = false
-                self.alertMessage = message
-                self.showingAlert = true
-            }
+        // Start uploading first image
+        if selectedImages.isEmpty {
+            createMarketplaceItem(urls: [])
+        } else {
+            uploadNextImage(index: 0)
+        }
+    }
+    
+    // MARK: - Create Marketplace Item
+    
+    private func createMarketplaceItem(urls: [String]) {
+        guard let coordinate = geocodedCoordinate,
+              let priceValue = Double(price),
+              let user = Auth.auth().currentUser,
+              let userName = user.displayName,
+              let userEmail = user.email else {
+            isUploading = false
+            alertMessage = "❌ Missing required information"
+            showingAlert = true
+            return
+        }
+        
+        // FIXED: Correct parameter order matching the new initializer
+        let item = MarketplaceItem(
+            title: self.title,
+            description: self.description,
+            price: priceValue,
+            category: self.category,
+            condition: self.condition,
+            location: self.location,       // Area/neighborhood
+            city: self.city,                // City
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            sellerId: user.uid,
+            sellerName: userName,
+            sellerEmail: userEmail,
+            photoURLs: urls
+        )
+        
+        // Add to Firestore
+        self.marketplaceViewModel.addItem(item) { success, message in
+            self.isUploading = false
+            self.alertMessage = message
+            self.showingAlert = true
         }
     }
 }

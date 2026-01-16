@@ -9,14 +9,12 @@ struct MarketplaceDetailView: View {
     @State private var region: MKCoordinateRegion
     @State private var showingEditSheet = false
     @State private var showingDeleteAlert = false
-    @State private var showingMarkSoldAlert = false
     @State private var showingAlert = false
     @State private var alertMessage = ""
-    @State private var showingContactSheet = false
+    @State private var showingShareSheet = false
+    @State private var showingMarkAsSoldAlert = false
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
-    
-    @EnvironmentObject var authViewModel: AuthViewModel
     
     var isOwner: Bool {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
@@ -25,7 +23,6 @@ struct MarketplaceDetailView: View {
         return item.sellerId == currentUserId
     }
     
-    // Check if this item is saved
     var isSaved: Bool {
         guard let itemId = item.id else { return false }
         return marketplaceViewModel.isSaved(itemId: itemId)
@@ -35,8 +32,8 @@ struct MarketplaceDetailView: View {
         self.item = item
         self.marketplaceViewModel = marketplaceViewModel
         _region = State(initialValue: MKCoordinateRegion(
-            center: item.coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+            center: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude),
+            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
         ))
     }
     
@@ -44,19 +41,12 @@ struct MarketplaceDetailView: View {
         ZStack(alignment: .topLeading) {
             ScrollView {
                 VStack(spacing: 0) {
-                    // Hero Image
+                    // Hero Image Section
                     HeroImageHeader(photoURLs: item.photoURLs)
                     
                     VStack(spacing: AppSpacing.lg) {
-                        // Header Info
+                        // Header Section
                         headerSection
-                        
-                        // Action Buttons
-                        if !isOwner {
-                            actionButtonsSection
-                        } else {
-                            ownerActionsSection
-                        }
                         
                         Divider()
                             .padding(.horizontal, AppSpacing.md)
@@ -73,14 +63,22 @@ struct MarketplaceDetailView: View {
                         Divider()
                             .padding(.horizontal, AppSpacing.md)
                         
-                        // Seller Info Section
-                        sellerSection
+                        // Location Section
+                        locationSection
                         
                         Divider()
                             .padding(.horizontal, AppSpacing.md)
                         
-                        // Location Section
-                        locationSection
+                        // Seller Section
+                        sellerSection
+                        
+                        // Owner Insights Section (ONLY visible to owner)
+                        if isOwner {
+                            Divider()
+                                .padding(.horizontal, AppSpacing.md)
+                            
+                            ownerInsightsSection
+                        }
                     }
                     .padding(.vertical, AppSpacing.lg)
                 }
@@ -106,11 +104,14 @@ struct MarketplaceDetailView: View {
             .padding(.leading, AppSpacing.md)
         }
         .navigationBarHidden(true)
+        .onAppear {
+            // Increment view count for non-owners
+            if !isOwner, let itemId = item.id {
+                marketplaceViewModel.incrementViewCount(for: itemId)
+            }
+        }
         .sheet(isPresented: $showingEditSheet) {
             EditMarketplaceItemView(item: item, marketplaceViewModel: marketplaceViewModel)
-        }
-        .sheet(isPresented: $showingContactSheet) {
-            ContactSellerView(item: item)
         }
         .alert("Delete Item", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
@@ -120,13 +121,13 @@ struct MarketplaceDetailView: View {
         } message: {
             Text("Are you sure you want to delete '\(item.title)'? This action cannot be undone.")
         }
-        .alert("Mark as Sold", isPresented: $showingMarkSoldAlert) {
+        .alert("Mark as Sold", isPresented: $showingMarkAsSoldAlert) {
             Button("Cancel", role: .cancel) { }
-            Button("Mark as Sold") {
+            Button("Mark as Sold", role: .destructive) {
                 markAsSold()
             }
         } message: {
-            Text("Mark '\(item.title)' as sold?")
+            Text("Mark this item as sold? It will still be visible but marked as unavailable.")
         }
         .alert("Message", isPresented: $showingAlert) {
             Button("OK", role: .cancel) {
@@ -137,12 +138,6 @@ struct MarketplaceDetailView: View {
         } message: {
             Text(alertMessage)
         }
-        .onAppear {
-            // Increment view count
-            if let itemId = item.id {
-                marketplaceViewModel.incrementViewCount(for: itemId)
-            }
-        }
     }
     
     // MARK: - Header Section
@@ -151,71 +146,20 @@ struct MarketplaceDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
-                    // Category Badge
-                    HStack(spacing: 6) {
-                        Image(systemName: item.category.icon)
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(item.category.rawValue)
-                            .font(AppFonts.captionBold)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(hex: item.category.color))
-                    .cornerRadius(AppRadius.sm)
-                    
-                    // Item Title
+                    // Title
                     Text(item.title)
                         .font(AppFonts.title1)
                         .foregroundColor(AppColors.textPrimary)
                     
                     // Price
                     Text(item.formattedPrice)
-                        .font(.system(size: 32, weight: .bold))
+                        .font(AppFonts.largeTitle)
                         .foregroundColor(AppColors.primary)
-                    
-                    // Condition & Stats
-                    HStack(spacing: 12) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(AppColors.success)
-                            Text(item.condition.rawValue)
-                                .font(AppFonts.caption)
-                                .foregroundColor(AppColors.textSecondary)
-                        }
-                        
-                        Text("•")
-                            .foregroundColor(AppColors.textTertiary)
-                        
-                        HStack(spacing: 4) {
-                            Image(systemName: "eye.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(AppColors.textSecondary)
-                            Text("\(item.viewCount) views")
-                                .font(AppFonts.caption)
-                                .foregroundColor(AppColors.textSecondary)
-                        }
-                        
-                        if item.savedCount > 0 {
-                            Text("•")
-                                .foregroundColor(AppColors.textTertiary)
-                            
-                            HStack(spacing: 4) {
-                                Image(systemName: "heart.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(AppColors.error)
-                                Text("\(item.savedCount) saved")
-                                    .font(AppFonts.caption)
-                                    .foregroundColor(AppColors.textSecondary)
-                            }
-                        }
-                    }
                 }
                 
                 Spacer()
                 
-                // Owner Menu
+                // Owner Actions
                 if isOwner {
                     Menu {
                         Button(action: {
@@ -226,7 +170,7 @@ struct MarketplaceDetailView: View {
                         
                         if !item.isSold {
                             Button(action: {
-                                showingMarkSoldAlert = true
+                                showingMarkAsSoldAlert = true
                             }) {
                                 Label("Mark as Sold", systemImage: "checkmark.circle")
                             }
@@ -252,102 +196,34 @@ struct MarketplaceDetailView: View {
                 }
             }
             
-            // Sold Banner
-            if item.isSold {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.white)
-                    Text("This item has been sold")
-                        .font(AppFonts.bodyBold)
-                        .foregroundColor(.white)
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.red)
-                .cornerRadius(AppRadius.md)
-            }
-        }
-        .padding(.horizontal, AppSpacing.md)
-    }
-    
-    // MARK: - Action Buttons Section
-    
-    var actionButtonsSection: some View {
-        HStack(spacing: AppSpacing.md) {
-            // Contact Seller Button
-            Button(action: {
-                showingContactSheet = true
-            }) {
-                HStack {
-                    Image(systemName: "message.fill")
-                    Text("Contact Seller")
-                }
-                .font(AppFonts.bodyBold)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(item.isSold ? AppColors.textTertiary : AppColors.primary)
-                .cornerRadius(AppRadius.md)
-            }
-            .disabled(item.isSold)
-            
-            // Save Button
-            Button(action: {
-                toggleSave()
-            }) {
-                Image(systemName: isSaved ? "heart.fill" : "heart")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(isSaved ? AppColors.error : AppColors.textPrimary)
-                    .frame(width: 56, height: 56)
+            // Condition Badge
+            HStack(spacing: 8) {
+                Text(item.condition.rawValue)
+                    .font(AppFonts.caption)
+                    .foregroundColor(AppColors.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(AppColors.surface)
-                    .cornerRadius(AppRadius.md)
-                    .shadow(color: AppShadow.small, radius: 4, x: 0, y: 2)
-            }
-        }
-        .padding(.horizontal, AppSpacing.md)
-    }
-    
-    // MARK: - Owner Actions Section
-    
-    var ownerActionsSection: some View {
-        VStack(spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.sm) {
-                Button(action: {
-                    showingEditSheet = true
-                }) {
-                    HStack {
-                        Image(systemName: "pencil")
-                        Text("Edit Listing")
-                    }
-                    .font(AppFonts.bodyBold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(AppColors.primary)
-                    .cornerRadius(AppRadius.md)
-                }
+                    .cornerRadius(AppRadius.sm)
                 
-                if !item.isSold {
-                    Button(action: {
-                        showingMarkSoldAlert = true
-                    }) {
-                        HStack {
-                            Image(systemName: "checkmark.circle")
-                            Text("Mark Sold")
-                        }
-                        .font(AppFonts.bodyBold)
+                Text(item.category.rawValue)
+                    .font(AppFonts.caption)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppColors.categoryColor(for: item.category.rawValue))
+                    .cornerRadius(AppRadius.sm)
+                
+                if item.isSold {
+                    Text("SOLD")
+                        .font(AppFonts.captionBold)
                         .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(AppColors.success)
-                        .cornerRadius(AppRadius.md)
-                    }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.red)
+                        .cornerRadius(AppRadius.sm)
                 }
             }
-            
-            Text("This is your listing")
-                .font(AppFonts.caption)
-                .foregroundColor(AppColors.textSecondary)
         }
         .padding(.horizontal, AppSpacing.md)
     }
@@ -356,7 +232,7 @@ struct MarketplaceDetailView: View {
     
     var descriptionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Description", icon: "doc.text.fill")
+            SectionHeader(title: "Description", icon: "text.alignleft")
             
             Text(item.description)
                 .font(AppFonts.body)
@@ -372,26 +248,59 @@ struct MarketplaceDetailView: View {
             SectionHeader(title: "Details", icon: "info.circle.fill")
             
             VStack(spacing: AppSpacing.sm) {
-                DetailRow(
+                InfoRow(
                     icon: "tag.fill",
                     title: "Category",
-                    value: item.category.rawValue,
-                    color: Color(hex: item.category.color)
-                )
-                
-                DetailRow(
-                    icon: "checkmark.seal.fill",
-                    title: "Condition",
-                    value: item.condition.rawValue,
-                    color: AppColors.success
-                )
-                
-                DetailRow(
-                    icon: "calendar",
-                    title: "Listed",
-                    value: item.createdAt.timeAgo(),
+                    subtitle: item.category.rawValue,
                     color: AppColors.primary
                 )
+                
+                InfoRow(
+                    icon: "star.fill",
+                    title: "Condition",
+                    subtitle: item.condition.rawValue,
+                    color: AppColors.warning
+                )
+                
+                InfoRow(
+                    icon: "calendar",
+                    title: "Posted",
+                    subtitle: item.createdAt.timeAgo(),
+                    color: AppColors.info
+                )
+            }
+            .padding(.horizontal, AppSpacing.md)
+        }
+    }
+    
+    // MARK: - Location Section
+    
+    var locationSection: some View {
+        VStack(spacing: AppSpacing.sm) {
+            SectionHeader(title: "Location", icon: "map.fill")
+            
+            VStack(spacing: AppSpacing.sm) {
+                // Map
+                Map(coordinateRegion: $region, annotationItems: [item]) { item in
+                    MapMarker(coordinate: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude), tint: .red)
+                }
+                .frame(height: 200)
+                .cornerRadius(AppRadius.md)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.md)
+                        .stroke(colorScheme == .dark ? AppColors.border.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+                
+                // Location Info
+                HStack {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(AppColors.primary)
+                    Text(item.location)
+                        .font(AppFonts.callout)
+                        .foregroundColor(AppColors.textSecondary)
+                    Spacer()
+                }
             }
             .padding(.horizontal, AppSpacing.md)
         }
@@ -401,7 +310,7 @@ struct MarketplaceDetailView: View {
     
     var sellerSection: some View {
         VStack(spacing: AppSpacing.sm) {
-            SectionHeader(title: "Seller Information", icon: "person.fill")
+            SectionHeader(title: "Seller", icon: "person.fill")
             
             HStack(spacing: 12) {
                 // Avatar
@@ -426,6 +335,26 @@ struct MarketplaceDetailView: View {
                 }
                 
                 Spacer()
+                
+                // Contact Button
+                if !isOwner {
+                    Button(action: {
+                        contactSeller()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "message.fill")
+                                .font(.system(size: 14))
+                            Text("Contact")
+                                .font(AppFonts.callout)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, AppSpacing.md)
+                        .padding(.vertical, 10)
+                        .background(AppColors.primary)
+                        .cornerRadius(AppRadius.full)
+                    }
+                }
             }
             .padding(AppSpacing.md)
             .background(AppColors.surface)
@@ -434,36 +363,373 @@ struct MarketplaceDetailView: View {
         }
     }
     
-    // MARK: - Location Section
+    // MARK: - Owner Insights Section (ONLY FOR OWNER)
     
-    var locationSection: some View {
-        VStack(spacing: AppSpacing.sm) {
-            SectionHeader(title: "Location", icon: "map.fill")
+    var ownerInsightsSection: some View {
+        VStack(spacing: AppSpacing.md) {
+            SectionHeader(title: "Listing Insights", icon: "chart.bar.fill")
             
-            VStack(spacing: AppSpacing.sm) {
-                // Map
-                Map(coordinateRegion: $region, annotationItems: [item]) { item in
-                    MapMarker(coordinate: item.coordinate, tint: .red)
-                }
-                .frame(height: 200)
-                .cornerRadius(AppRadius.md)
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md)
-                        .stroke(colorScheme == .dark ? AppColors.border.opacity(0.2) : Color.clear, lineWidth: 1)
+            // Stats Grid
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: AppSpacing.md) {
+                // Views
+                StatCard(
+                    icon: "eye.fill",
+                    value: "\(item.viewCount)",
+                    label: "Views",
+                    color: AppColors.info
                 )
                 
-                // Location Info
-                HStack {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(AppColors.primary)
-                    Text(item.location)
-                        .font(AppFonts.callout)
-                        .foregroundColor(AppColors.textPrimary)
-                    Spacer()
-                }
+                // Saves
+                StatCard(
+                    icon: "heart.fill",
+                    value: "\(item.savedCount)",
+                    label: "Saves",
+                    color: AppColors.error
+                )
+                
+                // Days Listed
+                StatCard(
+                    icon: "calendar",
+                    value: "\(daysListed)",
+                    label: "Days Listed",
+                    color: AppColors.success
+                )
+                
+                // Engagement Rate
+                StatCard(
+                    icon: "chart.line.uptrend.xyaxis",
+                    value: engagementRate,
+                    label: "Engagement",
+                    color: AppColors.warning
+                )
             }
             .padding(.horizontal, AppSpacing.md)
+            
+            // Performance Insights
+            VStack(spacing: AppSpacing.sm) {
+                InsightRow(
+                    icon: "star.fill",
+                    title: "Performance",
+                    value: performanceRating,
+                    color: performanceColor
+                )
+                
+                InsightRow(
+                    icon: "clock.fill",
+                    title: "Average Views/Day",
+                    value: viewsPerDay,
+                    color: AppColors.info
+                )
+                
+                InsightRow(
+                    icon: "percentage",
+                    title: "Save Rate",
+                    value: saveRate,
+                    color: AppColors.primary
+                )
+            }
+            .padding(AppSpacing.md)
+            .background(AppColors.surface)
+            .cornerRadius(AppRadius.md)
+            .padding(.horizontal, AppSpacing.md)
+            
+            // Quick Actions
+            VStack(spacing: AppSpacing.sm) {
+                Text("Quick Actions")
+                    .font(AppFonts.bodyBold)
+                    .foregroundColor(AppColors.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, AppSpacing.md)
+                
+                VStack(spacing: AppSpacing.sm) {
+                    // Share Listing
+                    Button(action: shareListing) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 20))
+                                .foregroundColor(AppColors.primary)
+                                .frame(width: 40)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Share Listing")
+                                    .font(AppFonts.callout)
+                                    .foregroundColor(AppColors.textPrimary)
+                                Text("Share on social media or copy link")
+                                    .font(AppFonts.caption)
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(AppColors.textTertiary)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Boost Listing (Future Feature)
+                    Button(action: {
+                        alertMessage = "Boost feature coming soon! This will promote your listing to more viewers."
+                        showingAlert = true
+                    }) {
+                        HStack {
+                            Image(systemName: "megaphone.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(AppColors.warning)
+                                .frame(width: 40)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("Boost Listing")
+                                        .font(AppFonts.callout)
+                                        .foregroundColor(AppColors.textPrimary)
+                                    Text("NEW")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(AppColors.warning)
+                                        .cornerRadius(4)
+                                }
+                                Text("Get more visibility for your listing")
+                                    .font(AppFonts.caption)
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(AppColors.textTertiary)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Edit Listing
+                    Button(action: {
+                        showingEditSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 20))
+                                .foregroundColor(AppColors.success)
+                                .frame(width: 40)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Edit Listing")
+                                    .font(AppFonts.callout)
+                                    .foregroundColor(AppColors.textPrimary)
+                                Text("Update price, photos, or description")
+                                    .font(AppFonts.caption)
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(AppColors.textTertiary)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Mark as Sold / Relist
+                    if item.isSold {
+                        Button(action: relistItem) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(AppColors.primary)
+                                    .frame(width: 40)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Relist Item")
+                                        .font(AppFonts.callout)
+                                        .foregroundColor(AppColors.textPrimary)
+                                    Text("Make this listing active again")
+                                        .font(AppFonts.caption)
+                                        .foregroundColor(AppColors.textSecondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(AppColors.textTertiary)
+                            }
+                            .padding(AppSpacing.md)
+                            .background(AppColors.surface)
+                            .cornerRadius(AppRadius.md)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    } else {
+                        Button(action: {
+                            showingMarkAsSoldAlert = true
+                        }) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(AppColors.success)
+                                    .frame(width: 40)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Mark as Sold")
+                                        .font(AppFonts.callout)
+                                        .foregroundColor(AppColors.textPrimary)
+                                    Text("Item has been sold")
+                                        .font(AppFonts.caption)
+                                        .foregroundColor(AppColors.textSecondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(AppColors.textTertiary)
+                            }
+                            .padding(AppSpacing.md)
+                            .background(AppColors.surface)
+                            .cornerRadius(AppRadius.md)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    
+                    // Delete Listing
+                    Button(action: {
+                        showingDeleteAlert = true
+                    }) {
+                        HStack {
+                            Image(systemName: "trash.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(AppColors.error)
+                                .frame(width: 40)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Delete Listing")
+                                    .font(AppFonts.callout)
+                                    .foregroundColor(AppColors.error)
+                                Text("Permanently remove this listing")
+                                    .font(AppFonts.caption)
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(AppColors.textTertiary)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.horizontal, AppSpacing.md)
+            }
+            
+            // Tips for Better Performance
+            if viewsPerDayValue < 5 || saveRateValue < 10 {
+                VStack(spacing: AppSpacing.sm) {
+                    HStack {
+                        Image(systemName: "lightbulb.fill")
+                            .foregroundColor(AppColors.warning)
+                        Text("Tips to Improve Performance")
+                            .font(AppFonts.bodyBold)
+                            .foregroundColor(AppColors.textPrimary)
+                        Spacer()
+                    }
+                    
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        if viewsPerDayValue < 5 {
+                            TipRow(text: "Add more high-quality photos to attract viewers")
+                            TipRow(text: "Write a detailed description with keywords")
+                            TipRow(text: "Share your listing on social media")
+                        }
+                        
+                        if saveRateValue < 10 {
+                            TipRow(text: "Consider adjusting your price to be more competitive")
+                            TipRow(text: "Highlight unique features in your description")
+                            TipRow(text: "Respond quickly to inquiries")
+                        }
+                    }
+                }
+                .padding(AppSpacing.md)
+                .background(AppColors.warning.opacity(0.1))
+                .cornerRadius(AppRadius.md)
+                .padding(.horizontal, AppSpacing.md)
+            }
+        }
+    }
+    
+    // MARK: - Computed Properties for Insights
+    
+    var daysListed: Int {
+        let days = Calendar.current.dateComponents([.day], from: item.createdAt, to: Date()).day ?? 0
+        return max(1, days)
+    }
+    
+    var viewsPerDayValue: Double {
+        Double(item.viewCount) / Double(daysListed)
+    }
+    
+    var viewsPerDay: String {
+        String(format: "%.1f", viewsPerDayValue)
+    }
+    
+    var saveRateValue: Double {
+        guard item.viewCount > 0 else { return 0 }
+        return (Double(item.savedCount) / Double(item.viewCount)) * 100
+    }
+    
+    var saveRate: String {
+        String(format: "%.1f%%", saveRateValue)
+    }
+    
+    var engagementRate: String {
+        guard item.viewCount > 0 else { return "0%" }
+        let rate = (Double(item.savedCount) / Double(item.viewCount)) * 100
+        return String(format: "%.0f%%", rate)
+    }
+    
+    var performanceRating: String {
+        let score = (viewsPerDayValue * 2) + saveRateValue
+        
+        if score >= 30 {
+            return "Excellent"
+        } else if score >= 20 {
+            return "Good"
+        } else if score >= 10 {
+            return "Average"
+        } else {
+            return "Needs Improvement"
+        }
+    }
+    
+    var performanceColor: Color {
+        let score = (viewsPerDayValue * 2) + saveRateValue
+        
+        if score >= 30 {
+            return AppColors.success
+        } else if score >= 20 {
+            return AppColors.info
+        } else if score >= 10 {
+            return AppColors.warning
+        } else {
+            return AppColors.error
         }
     }
     
@@ -483,198 +749,145 @@ struct MarketplaceDetailView: View {
         }
     }
     
-    func toggleSave() {
-        guard let itemId = item.id else {
-            print("❌ Item ID missing")
-            return
+    func contactSeller() {
+        if let url = URL(string: "mailto:\(item.sellerEmail)") {
+            UIApplication.shared.open(url)
         }
+    }
+    
+    func shareListing() {
+        let text = """
+        Check out this listing: \(item.title)
         
-        guard Auth.auth().currentUser != nil else {
-            print("⚠️ User not logged in")
-            alertMessage = "Please login to save items"
+        💰 Price: \(item.formattedPrice)
+        📍 Location: \(item.location)
+        
+        Condition: \(item.condition.rawValue)
+        Category: \(item.category.rawValue)
+        
+        \(item.description)
+        """
+        
+        let activityVC = UIActivityViewController(
+            activityItems: [text],
+            applicationActivities: nil
+        )
+        
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootVC = window.rootViewController {
+            activityVC.popoverPresentationController?.sourceView = rootVC.view
+            activityVC.popoverPresentationController?.sourceRect = CGRect(x: UIScreen.main.bounds.width / 2, y: UIScreen.main.bounds.height / 2, width: 0, height: 0)
+            activityVC.popoverPresentationController?.permittedArrowDirections = []
+            rootVC.present(activityVC, animated: true)
+        }
+    }
+    
+    func relistItem() {
+        guard let itemId = item.id else { return }
+        
+        marketplaceViewModel.updateItem(MarketplaceItem(
+            id: itemId,
+            title: item.title,
+            description: item.description,
+            price: item.price,
+            category: item.category,
+            condition: item.condition,
+            location: item.location,
+            city: item.city,
+            latitude: item.latitude,
+            longitude: item.longitude,
+            sellerId: item.sellerId,
+            sellerName: item.sellerName,
+            sellerEmail: item.sellerEmail,
+            photoURLs: item.photoURLs,
+            isSold: false,
+            viewCount: item.viewCount,
+            savedCount: item.savedCount,
+            createdAt: item.createdAt
+        )) { success, message in
+            alertMessage = message
             showingAlert = true
-            return
-        }
-        
-        marketplaceViewModel.toggleSave(itemId: itemId) { success, message in
-            if !success {
-                self.alertMessage = message
-                self.showingAlert = true
-            }
         }
     }
 }
 
-// MARK: - Detail Row Component
+// MARK: - Supporting Components
 
-struct DetailRow: View {
+struct StatCard: View {
+    let icon: String
+    let value: String
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.15))
+                    .frame(width: 56, height: 56)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 24))
+                    .foregroundColor(color)
+            }
+            
+            Text(value)
+                .font(AppFonts.title2)
+                .foregroundColor(AppColors.textPrimary)
+            
+            Text(label)
+                .font(AppFonts.caption)
+                .foregroundColor(AppColors.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(AppColors.surface)
+        .cornerRadius(AppRadius.md)
+    }
+}
+
+struct InsightRow: View {
     let icon: String
     let title: String
     let value: String
     let color: Color
     
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppRadius.sm)
-                    .fill(color.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(color)
-            }
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(color)
+                .frame(width: 32)
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(AppFonts.caption)
-                    .foregroundColor(AppColors.textSecondary)
-                
-                Text(value)
-                    .font(AppFonts.body)
-                    .foregroundColor(AppColors.textPrimary)
-            }
+            Text(title)
+                .font(AppFonts.callout)
+                .foregroundColor(AppColors.textSecondary)
             
             Spacer()
+            
+            Text(value)
+                .font(AppFonts.callout)
+                .fontWeight(.semibold)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .padding(AppSpacing.md)
-        .background(AppColors.surface)
-        .cornerRadius(AppRadius.md)
     }
 }
 
-// MARK: - Contact Seller View
-
-struct ContactSellerView: View {
-    let item: MarketplaceItem
-    @Environment(\.dismiss) var dismiss
+struct TipRow: View {
+    let text: String
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: AppSpacing.lg) {
-                // Seller Info
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(AppColors.primary.opacity(0.15))
-                            .frame(width: 80, height: 80)
-                        
-                        Text(item.sellerName.prefix(1).uppercased())
-                            .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(AppColors.primary)
-                    }
-                    
-                    Text(item.sellerName)
-                        .font(AppFonts.title2)
-                        .foregroundColor(AppColors.textPrimary)
-                    
-                    Text(item.sellerEmail)
-                        .font(AppFonts.callout)
-                        .foregroundColor(AppColors.textSecondary)
-                }
-                .padding(.top, AppSpacing.xl)
-                
-                // Contact Options
-                VStack(spacing: AppSpacing.md) {
-                    Button(action: {
-                        sendEmail()
-                    }) {
-                        HStack {
-                            Image(systemName: "envelope.fill")
-                                .font(.system(size: 20))
-                            Text("Send Email")
-                                .font(AppFonts.bodyBold)
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(AppColors.primary)
-                        .cornerRadius(AppRadius.md)
-                    }
-                    
-                    // Copy Email Button
-                    Button(action: {
-                        copyEmail()
-                    }) {
-                        HStack {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 20))
-                            Text("Copy Email")
-                                .font(AppFonts.bodyBold)
-                        }
-                        .foregroundColor(AppColors.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(AppColors.primary.opacity(0.1))
-                        .cornerRadius(AppRadius.md)
-                    }
-                }
-                .padding(.horizontal, AppSpacing.lg)
-                
-                // Item Info
-                HStack(spacing: 12) {
-                    if let firstPhotoURL = item.photoURLs.first,
-                       let url = URL(string: firstPhotoURL) {
-                        CachedAsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 60, height: 60)
-                                .clipped()
-                                .cornerRadius(AppRadius.md)
-                        } placeholder: {
-                            ZStack {
-                                AppColors.surface
-                                ProgressView()
-                            }
-                            .frame(width: 60, height: 60)
-                            .cornerRadius(AppRadius.md)
-                        }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(AppFonts.bodyBold)
-                            .foregroundColor(AppColors.textPrimary)
-                            .lineLimit(1)
-                        
-                        Text(item.formattedPrice)
-                            .font(AppFonts.title3)
-                            .foregroundColor(AppColors.primary)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(AppSpacing.md)
-                .background(AppColors.surface)
-                .cornerRadius(AppRadius.md)
-                .padding(.horizontal, AppSpacing.lg)
-                
-                Spacer()
-            }
-            .background(AppColors.background)
-            .navigationTitle("Contact Seller")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(AppColors.success)
+            
+            Text(text)
+                .font(AppFonts.caption)
+                .foregroundColor(AppColors.textSecondary)
+            
+            Spacer()
         }
-    }
-    
-    func sendEmail() {
-        let subject = "Interested in: \(item.title)"
-        let body = "Hi \(item.sellerName),\n\nI'm interested in your item '\(item.title)' listed for \(item.formattedPrice).\n\n"
-        
-        if let url = URL(string: "mailto:\(item.sellerEmail)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&body=\(body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
-            UIApplication.shared.open(url)
-        }
-    }
-    
-    func copyEmail() {
-        UIPasteboard.general.string = item.sellerEmail
     }
 }

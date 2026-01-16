@@ -10,17 +10,18 @@ struct MarketplaceItem: Identifiable, Codable {
     var price: Double
     var category: MarketplaceCategory
     var condition: ItemCondition
-    var photoURLs: [String] = []
+    var location: String // City/area
+    var city: String // Add this property
+    var latitude: Double
+    var longitude: Double
     var sellerId: String
     var sellerName: String
     var sellerEmail: String
-    var location: String // City/area
-    var latitude: Double
-    var longitude: Double
-    var createdAt: Date
+    var photoURLs: [String] = []
     var isSold: Bool = false
     var viewCount: Int = 0
     var savedCount: Int = 0
+    var createdAt: Date
     
     // Computed property for coordinate
     var coordinate: CLLocationCoordinate2D {
@@ -32,7 +33,7 @@ struct MarketplaceItem: Identifiable, Codable {
         return String(format: "$%.2f", price)
     }
     
-    // Initialize new marketplace item
+    // Initialize new marketplace item - UPDATED to include all parameters
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -40,14 +41,18 @@ struct MarketplaceItem: Identifiable, Codable {
         price: Double,
         category: MarketplaceCategory,
         condition: ItemCondition,
-        photoURLs: [String] = [],
+        location: String,
+        city: String,
+        latitude: Double,
+        longitude: Double,
         sellerId: String,
         sellerName: String,
         sellerEmail: String,
-        location: String,
-        latitude: Double,
-        longitude: Double,
-        isSold: Bool = false
+        photoURLs: [String] = [],
+        isSold: Bool = false,
+        viewCount: Int = 0,
+        savedCount: Int = 0,
+        createdAt: Date = Date()
     ) {
         self.id = id
         self.title = title
@@ -55,15 +60,18 @@ struct MarketplaceItem: Identifiable, Codable {
         self.price = price
         self.category = category
         self.condition = condition
-        self.photoURLs = photoURLs
+        self.location = location
+        self.city = city
+        self.latitude = latitude
+        self.longitude = longitude
         self.sellerId = sellerId
         self.sellerName = sellerName
         self.sellerEmail = sellerEmail
-        self.location = location
-        self.latitude = latitude
-        self.longitude = longitude
-        self.createdAt = Date()
+        self.photoURLs = photoURLs
         self.isSold = isSold
+        self.viewCount = viewCount
+        self.savedCount = savedCount
+        self.createdAt = createdAt
     }
 }
 

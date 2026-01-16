@@ -35,8 +35,12 @@ class MarketplaceViewModel: ObservableObject {
     private var cacheTimestamp: Date?
     private let cacheValidDuration: TimeInterval = 300 // 5 minutes
     
+    // Track viewed items to prevent duplicate view counts
+    private var viewedItemIds: Set<String> = []
+    
     // MARK: - Initialization
     init() {
+        loadViewedItems() // Load viewed items first
         setupRealtimeListener()
         fetchUserSavedItems()
     }
@@ -44,6 +48,59 @@ class MarketplaceViewModel: ObservableObject {
     deinit {
         itemsListener?.remove()
         savesListener?.remove()
+        saveViewedItems() // Save viewed items when deinit
+    }
+    
+    // MARK: - Load/Save Viewed Items (Persistent across app launches)
+    
+    private func loadViewedItems() {
+        if let data = UserDefaults.standard.data(forKey: "viewedMarketplaceItems"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            viewedItemIds = decoded
+            print("✅ Loaded \(viewedItemIds.count) previously viewed items")
+        }
+    }
+    
+    private func saveViewedItems() {
+        if let encoded = try? JSONEncoder().encode(viewedItemIds) {
+            UserDefaults.standard.set(encoded, forKey: "viewedMarketplaceItems")
+            print("💾 Saved \(viewedItemIds.count) viewed items to UserDefaults")
+        }
+    }
+    
+    // MARK: - Increment View Count (Only Once Per User)
+    
+    func incrementViewCount(for itemId: String) {
+        // Check if already viewed by this user
+        guard !viewedItemIds.contains(itemId) else {
+            print("👁️ Item \(itemId) already viewed by this user, skipping increment")
+            return
+        }
+        
+        // Mark as viewed
+        viewedItemIds.insert(itemId)
+        saveViewedItems()
+        
+        print("👁️ First time viewing item \(itemId), incrementing view count")
+        
+        // Increment in Firestore
+        db.collection("marketplace_items").document(itemId).updateData([
+            "viewCount": FieldValue.increment(Int64(1))
+        ]) { error in
+            if let error = error {
+                print("❌ Error incrementing view count: \(error.localizedDescription)")
+            } else {
+                print("✅ View count incremented for item: \(itemId)")
+            }
+        }
+    }
+    
+    // MARK: - Clear Viewed Items (Optional - for testing or reset)
+    
+    func clearViewedItems() {
+        viewedItemIds.removeAll()
+        saveViewedItems()
+        print("🗑️ Cleared all viewed items")
     }
     
     // MARK: - Real-time Listener
@@ -332,16 +389,9 @@ class MarketplaceViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Increment View Count
-    func incrementViewCount(for itemId: String) {
-        db.collection("marketplace_items").document(itemId).updateData([
-            "viewCount": FieldValue.increment(Int64(1))
-        ])
-    }
-    
     // MARK: - Upload Image
     func uploadImage(_ image: UIImage, completion: @escaping (String?) -> Void) {
-        CloudinaryManager.shared.uploadImage(image) { result in
+        CloudinaryManager.shared.uploadImage(image, folder: .marketplace, preset: .marketplace) { result in
             switch result {
             case .success(let url):
                 print("✅ Image uploaded: \(url)")
@@ -352,7 +402,7 @@ class MarketplaceViewModel: ObservableObject {
             }
         }
     }
-    
+
     // MARK: - Get User Items
     func getUserItems() -> [MarketplaceItem] {
         guard let userId = Auth.auth().currentUser?.uid else {

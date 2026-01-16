@@ -16,11 +16,19 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
+            
+            JobsMainView()
+                .environmentObject(authViewModel)
+                .tabItem {
+                    Label("Jobs", systemImage: "briefcase.fill")
+                }
+            
             MarketplaceView()
                 .environmentObject(authViewModel)
                 .tabItem {
                     Label("Marketplace", systemImage: "cart")
                 }
+            
             ProfileView(authViewModel: authViewModel, businessViewModel: businessViewModel)
                 .tabItem {
                     Label("Profile", systemImage: "person.fill")
@@ -28,6 +36,6 @@ struct MainTabView: View {
         }
         .environmentObject(businessViewModel)
         .environmentObject(authViewModel)
-        .environmentObject(favoriteViewModel)  
+        .environmentObject(favoriteViewModel)
     }
 }

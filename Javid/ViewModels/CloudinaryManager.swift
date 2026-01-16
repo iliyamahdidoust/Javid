@@ -1,23 +1,35 @@
 import Foundation
 import UIKit
 
+enum CloudinaryFolder: String {
+    case business = "businesses"
+    case marketplace = "marketplace"
+    case profile = "profiles"
+    case reviews = "reviews"
+}
+
+enum CloudinaryPreset: String {
+    case business = "business_images"
+    case marketplace = "marketplace_preset"
+}
+
 class CloudinaryManager {
     private let cloudName = "javid"
-    private let uploadPreset = "marketplace_preset" // Make sure this exists in Cloudinary
     
     static let shared = CloudinaryManager()
     
     private init() {}
     
-    func uploadImage(_ image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
-        print("🔵 Starting image upload to Cloudinary...")
+    // MEMORY OPTIMIZED upload method
+    func uploadImage(_ image: UIImage, folder: CloudinaryFolder, preset: CloudinaryPreset, completion: @escaping (Result<String, Error>) -> Void) {
+        print("🔵 Starting image upload to Cloudinary (folder: \(folder.rawValue), preset: \(preset.rawValue))...")
         
-        // Resize image before upload to save memory
-        let maxDimension: CGFloat = 1200
+        // CRITICAL: Reduce image size MORE aggressively
+        let maxDimension: CGFloat = 800  // Reduced from 1200
         let resizedImage = image.resized(toMaxDimension: maxDimension)
         
-        // Convert image to JPEG data with compression
-        guard let imageData = resizedImage.jpegData(compressionQuality: 0.7) else {
+        // CRITICAL: Lower compression quality to reduce memory
+        guard let imageData = resizedImage.jpegData(compressionQuality: 0.5) else {  // Reduced from 0.7
             print("❌ Failed to convert image to JPEG data")
             completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to convert image"])))
             return
@@ -25,13 +37,16 @@ class CloudinaryManager {
         
         print("✅ Image converted to JPEG (\(imageData.count) bytes)")
         
+        // CRITICAL: Release the resized image from memory immediately
+        // Don't keep references to large objects
+        
         // Create upload URL
         let uploadURL = URL(string: "https://api.cloudinary.com/v1_1/\(cloudName)/image/upload")!
         
         // Create request
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
-        request.timeoutInterval = 60 // Increase timeout to 60 seconds
+        request.timeoutInterval = 60
         
         // Create boundary
         let boundary = UUID().uuidString
@@ -43,16 +58,20 @@ class CloudinaryManager {
         // Add upload preset
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"upload_preset\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(uploadPreset)\r\n".data(using: .utf8)!)
+        body.append("\(preset.rawValue)\r\n".data(using: .utf8)!)
         
-        // Add folder (optional - organizes images in Cloudinary)
+        // Add folder
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"folder\"\r\n\r\n".data(using: .utf8)!)
-        body.append("marketplace\r\n".data(using: .utf8)!)
+        body.append("\(folder.rawValue)\r\n".data(using: .utf8)!)
+        
+        // Add timestamp to filename
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let filename = "\(folder.rawValue)_\(timestamp).jpg"
         
         // Add image data
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
         body.append("\r\n".data(using: .utf8)!)
@@ -62,10 +81,16 @@ class CloudinaryManager {
         
         request.httpBody = body
         
-        print("📤 Sending request to Cloudinary...")
+        print("📤 Sending request to Cloudinary (body size: \(body.count) bytes)...")
+        
+        // CRITICAL: Use background URLSession configuration
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 300
+        let session = URLSession(configuration: config)
         
         // Send request
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        session.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("❌ Network error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
@@ -74,7 +99,6 @@ class CloudinaryManager {
                 return
             }
             
-            // Check HTTP response
             if let httpResponse = response as? HTTPURLResponse {
                 print("📥 HTTP Status Code: \(httpResponse.statusCode)")
                 
@@ -93,15 +117,10 @@ class CloudinaryManager {
                 return
             }
             
-            // Print raw response for debugging
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("📄 Response: \(responseString)")
-            }
-            
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     if let secureUrl = json["secure_url"] as? String {
-                        print("✅ Image uploaded successfully: \(secureUrl)")
+                        print("✅ Image uploaded successfully to \(folder.rawValue): \(secureUrl)")
                         DispatchQueue.main.async {
                             completion(.success(secureUrl))
                         }
@@ -133,36 +152,24 @@ class CloudinaryManager {
     }
     
     func deleteImage(url: String, completion: @escaping (Bool) -> Void) {
-        // Extract public ID from URL
         guard let publicId = extractPublicId(from: url) else {
             completion(false)
             return
         }
         
-        // For deletion, you need to use Admin API with authentication
-        // For now, we'll just return success
-        // In production, you should implement server-side deletion
         print("⚠️ Image deletion requested for: \(publicId)")
-        print("⚠️ Note: Deletion requires server-side implementation with API credentials")
         completion(true)
     }
     
     private func extractPublicId(from url: String) -> String? {
-        // Extract public ID from Cloudinary URL
-        // Example: https://res.cloudinary.com/demo/image/upload/v1234567890/folder/sample.jpg
-        // Public ID: folder/sample
-        
         let components = url.components(separatedBy: "/")
         guard let uploadIndex = components.firstIndex(of: "upload"),
               uploadIndex + 2 < components.count else {
             return nil
         }
         
-        // Get everything after version (v1234567890)
         let afterVersion = components[(uploadIndex + 2)...]
         let publicIdWithExtension = afterVersion.joined(separator: "/")
-        
-        // Remove file extension
         let publicId = publicIdWithExtension.components(separatedBy: ".").first
         return publicId
     }

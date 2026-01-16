@@ -300,7 +300,7 @@ class BusinessViewModel: ObservableObject {
     
     // Upload image using Cloudinary
     func uploadImage(_ image: UIImage, for businessId: String, completion: @escaping (String?) -> Void) {
-        CloudinaryManager.shared.uploadImage(image) { result in
+        CloudinaryManager.shared.uploadImage(image, folder: .business, preset: .business) { result in
             switch result {
             case .success(let url):
                 print("✅ Image uploaded: \(url)")
