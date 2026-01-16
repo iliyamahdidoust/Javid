@@ -115,7 +115,7 @@ class JobSeekerProfileViewModel: ObservableObject {
     
     // MARK: - Upload Profile Photo
     func uploadProfilePhoto(_ image: UIImage, completion: @escaping (String?) -> Void) {
-        CloudinaryManager.shared.uploadImage(image) { result in
+        CloudinaryManager.shared.uploadImage(image, folder: .profile, preset: .business) { result in
             switch result {
             case .success(let url):
                 print("✅ Profile photo uploaded: \(url)")
