@@ -9,114 +9,88 @@ struct MarketplaceItemCard: View {
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 0) {
-                // Image Section - Fixed height container with explicit width
-                ZStack(alignment: .topTrailing) {
-                    if let firstPhotoURL = item.photoURLs.first,
-                       let url = URL(string: firstPhotoURL) {
-                        CachedAsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geometry.size.width, height: 140)
-                                .clipped()
-                        } placeholder: {
-                            ZStack {
-                                AppColors.surface
+        VStack(alignment: .leading, spacing: 0) {
+            // Image Section - Square 1:1 ratio
+            ZStack {
+                if let firstPhotoURL = item.photoURLs.first,
+                   let url = URL(string: firstPhotoURL) {
+                    CachedAsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(1, contentMode: .fill)
+                            .clipped()
+                    } placeholder: {
+                        Rectangle()
+                            .fill(Color(white: colorScheme == .dark ? 0.2 : 0.95))
+                            .aspectRatio(1, contentMode: .fit)
+                            .overlay(
                                 ProgressView()
-                                    .scaleEffect(0.8)
-                            }
-                            .frame(width: geometry.size.width, height: 140)
-                        }
-                    } else {
-                        ZStack {
-                            AppColors.surface
-                            VStack(spacing: 8) {
-                                Image(systemName: "photo")
-                                    .font(.system(size: 30))
-                                    .foregroundColor(AppColors.textTertiary)
-                                Text("No photo")
-                                    .font(AppFonts.caption)
-                                    .foregroundColor(AppColors.textTertiary)
-                            }
-                        }
-                        .frame(width: geometry.size.width, height: 140)
+                            )
                     }
-                    
-                    // Sold Badge
-                    if item.isSold {
-                        Text("SOLD")
-                            .font(AppFonts.captionBold)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.red)
-                            .cornerRadius(AppRadius.sm)
-                            .padding([.top, .trailing], AppSpacing.sm)
-                    }
+                } else {
+                    Rectangle()
+                        .fill(Color(white: colorScheme == .dark ? 0.2 : 0.95))
+                        .aspectRatio(1, contentMode: .fit)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 40))
+                                .foregroundColor(.gray.opacity(0.5))
+                        )
                 }
-                .frame(width: geometry.size.width, height: 140)
-                .clipped()
                 
-                // Content Section
-                VStack(alignment: .leading, spacing: 6) {
-                    // Price
-                    Text(item.formattedPrice)
-                        .font(AppFonts.title3)
-                        .foregroundColor(AppColors.primary)
-                        .lineLimit(1)
-                    
-                    // Title
-                    Text(item.title)
-                        .font(AppFonts.callout)
-                        .foregroundColor(AppColors.textPrimary)
-                        .lineLimit(2)
-                        .frame(height: 36, alignment: .top)
-                    
-                    // Location & Distance
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(AppColors.textSecondary)
-                        
-                        Text(item.location)
-                            .font(AppFonts.caption)
-                            .foregroundColor(AppColors.textSecondary)
-                            .lineLimit(1)
-                        
-                        if let distance = distance {
-                            Text("• \(String(format: "%.1f km", distance))")
-                                .font(AppFonts.caption)
-                                .foregroundColor(AppColors.textTertiary)
-                        }
-                    }
-                    
-                    // Condition badge
-                    Text(item.condition.rawValue)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(AppColors.textSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(AppColors.surface.opacity(0.5))
-                        .cornerRadius(4)
+                // SOLD overlay
+                if item.isSold {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.7))
+                        .aspectRatio(1, contentMode: .fit)
+                        .overlay(
+                            VStack(spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 30))
+                                    .foregroundColor(.white)
+                                Text("SOLD")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                        )
                 }
-                .padding(AppSpacing.sm)
-                .background(AppColors.surface)
             }
-            .background(AppColors.surface)
-            .cornerRadius(AppRadius.md)
-            .shadow(color: colorScheme == .dark ? Color.clear : AppShadow.small, radius: 4, x: 0, y: 2)
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md)
-                    .stroke(colorScheme == .dark ? AppColors.border.opacity(0.2) : Color.clear, lineWidth: 1)
-            )
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 20)
+            
+            // Text Section - Black/Dark background like Facebook
+            VStack(alignment: .leading, spacing: 4) {
+                // Price
+                Text(item.formattedPrice)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(AppColors.textPrimary)
+                
+                // Subject (Title) - dotted if too long
+                Text(item.title)
+                    .font(.system(size: 14))
+                    .foregroundColor(AppColors.textSecondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                
+                // City, distance
+                HStack(spacing: 0) {
+                    Text(item.location)
+                        .font(.system(size: 12))
+                        .foregroundColor(AppColors.textTertiary)
+                    
+                    if let distance = distance {
+                        Text("(\(String(format: "%.1f", distance))km)")
+                            .font(.system(size: 12))
+                            .foregroundColor(AppColors.textTertiary)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.98))
         }
-        .aspectRatio(0.75, contentMode: .fit)
+        .background(colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.98))
+        .opacity(appeared ? 1 : 0)
         .onAppear {
-            withAnimation(.easeOut(duration: 0.3)) {
+            withAnimation(.easeOut(duration: 0.2)) {
                 appeared = true
             }
         }

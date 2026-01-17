@@ -13,6 +13,8 @@ class MarketplaceViewModel: ObservableObject {
     @Published var errorMessage = ""
     @Published var hasMoreData = true
     @Published var savedItemIds: Set<String> = []
+    @Published var userItems: [MarketplaceItem] = [] // ✅ NEW: Store user items separately
+
     
     // Filter properties
     @Published var selectedCategory: MarketplaceCategory? = nil
@@ -26,6 +28,7 @@ class MarketplaceViewModel: ObservableObject {
     private let pageSize = 15
     private var itemsListener: ListenerRegistration?
     private var savesListener: ListenerRegistration?
+    private var userItemsListener: ListenerRegistration?
     
     // Location for distance sorting
     var userLocation: CLLocation?
@@ -46,11 +49,15 @@ class MarketplaceViewModel: ObservableObject {
     }
     
     deinit {
+        removeUserItemsListener()
         itemsListener?.remove()
         savesListener?.remove()
-        saveViewedItems() // Save viewed items when deinit
+        saveViewedItems()
     }
-    
+    func removeUserItemsListener() {
+        userItemsListener?.remove()
+        userItemsListener = nil
+    }
     // MARK: - Load/Save Viewed Items (Persistent across app launches)
     
     private func loadViewedItems() {
@@ -103,13 +110,14 @@ class MarketplaceViewModel: ObservableObject {
         print("🗑️ Cleared all viewed items")
     }
     
-    // MARK: - Real-time Listener
+    // MARK: - Real-time Listener (EXCLUDES SOLD ITEMS)
     private func setupRealtimeListener() {
         guard !isLoading else { return }
         
         isLoading = true
         
         var query: Query = db.collection("marketplace_items")
+            .whereField("isSold", isEqualTo: false)  // ✅ EXCLUDE SOLD ITEMS
             .order(by: "createdAt", descending: true)
             .limit(to: pageSize)
         
@@ -159,11 +167,11 @@ class MarketplaceViewModel: ObservableObject {
             // Sort items
             self.sortItems()
             
-            print("✅ Loaded \(self.items.count) marketplace items")
+            print("✅ Loaded \(self.items.count) marketplace items (excluding sold)")
         }
     }
     
-    // MARK: - Fetch Items (fallback)
+    // MARK: - Fetch Items (fallback) (EXCLUDES SOLD ITEMS)
     func fetchItems() {
         // Check cache first
         if let cacheTimestamp = cacheTimestamp,
@@ -180,6 +188,7 @@ class MarketplaceViewModel: ObservableObject {
         lastDocument = nil
         
         var query: Query = db.collection("marketplace_items")
+            .whereField("isSold", isEqualTo: false)  // ✅ EXCLUDE SOLD ITEMS
             .order(by: "createdAt", descending: true)
             .limit(to: pageSize)
         
@@ -217,11 +226,11 @@ class MarketplaceViewModel: ObservableObject {
             // Sort items
             self?.sortItems()
             
-            print("✅ Loaded \(self?.items.count ?? 0) marketplace items")
+            print("✅ Loaded \(self?.items.count ?? 0) marketplace items (excluding sold)")
         }
     }
     
-    // MARK: - Load More (Pagination)
+    // MARK: - Load More (Pagination) (EXCLUDES SOLD ITEMS)
     func loadMoreItems() {
         guard !isLoadingMore,
               !isLoading,
@@ -233,6 +242,7 @@ class MarketplaceViewModel: ObservableObject {
         isLoadingMore = true
         
         var query: Query = db.collection("marketplace_items")
+            .whereField("isSold", isEqualTo: false)  // ✅ EXCLUDE SOLD ITEMS
             .order(by: "createdAt", descending: true)
             .start(afterDocument: lastDoc)
             .limit(to: pageSize)
@@ -384,10 +394,13 @@ class MarketplaceViewModel: ObservableObject {
             if let error = error {
                 completion(false, "Failed to mark as sold: \(error.localizedDescription)")
             } else {
+                // ✅ Remove from main feed immediately
+                self.items.removeAll { $0.id == itemId }
                 completion(true, "✅ Marked as sold!")
             }
         }
     }
+    
     
     // MARK: - Upload Image
     func uploadImage(_ image: UIImage, completion: @escaping (String?) -> Void) {
@@ -402,13 +415,39 @@ class MarketplaceViewModel: ObservableObject {
             }
         }
     }
-
-    // MARK: - Get User Items
-    func getUserItems() -> [MarketplaceItem] {
+    
+    // MARK: - Get User Items (INCLUDING SOLD ITEMS - For Profile View)
+    func fetchUserItems(completion: @escaping (Result<[MarketplaceItem], Error>) -> Void) {
         guard let userId = Auth.auth().currentUser?.uid else {
-            return []
+            completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "No user logged in"])))
+            return
         }
-        return items.filter { $0.sellerId == userId }
+        
+        // Remove old listener if exists
+        userItemsListener?.remove()
+        
+        // Set up real-time listener
+        userItemsListener = db.collection("marketplace")
+            .whereField("sellerId", isEqualTo: userId)
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+                
+                self.userItems = snapshot?.documents.compactMap { doc in
+                    try? doc.data(as: MarketplaceItem.self)
+                } ?? []
+                
+                completion(.success(self.userItems))
+            }
+    }
+    // MARK: - Get User Items (Quick access)
+    func getUserItems() -> [MarketplaceItem] {
+        return userItems
     }
     
     // MARK: - Saved Items
@@ -540,7 +579,7 @@ class MarketplaceViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Search Items
+    // MARK: - Search Items (EXCLUDES SOLD)
     func searchItems(query: String) -> [MarketplaceItem] {
         guard !query.isEmpty else { return items }
         
@@ -570,9 +609,6 @@ class MarketplaceViewModel: ObservableObject {
         
         // Filter by price range
         filtered = filtered.filter { $0.price >= priceRange.lowerBound && $0.price <= priceRange.upperBound }
-        
-        // Filter out sold items (optional)
-        // filtered = filtered.filter { !$0.isSold }
         
         return filtered
     }

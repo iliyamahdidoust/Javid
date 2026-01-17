@@ -103,7 +103,7 @@ class EmployerProfileViewModel: ObservableObject {
         
         try await db.collection("employer_profiles")
             .document(userId)
-            .updateData(updates)
+            .setData(updates, merge: true)
     }
     
     // MARK: - Submit Verification
@@ -121,7 +121,7 @@ class EmployerProfileViewModel: ObservableObject {
         do {
             try await db.collection("employer_profiles")
                 .document(userId)
-                .updateData(updates)
+                .setData(updates, merge: true)
         } catch {
             await MainActor.run {
                 self.errorMessage = "Failed to submit verification: \(error.localizedDescription)"
@@ -135,16 +135,9 @@ class EmployerProfileViewModel: ObservableObject {
             throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        // Create temporary file
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("logo_\(UUID().uuidString).jpg")
-        try imageData.write(to: tempURL)
-        
-        // Upload to Cloudinary
+        // Upload to Cloudinary using the image endpoint
         return try await withCheckedThrowingContinuation { continuation in
-            DocumentManager.shared.uploadDocument(tempURL) { result in
-                // Clean up temp file
-                try? FileManager.default.removeItem(at: tempURL)
-                
+            DocumentManager.shared.uploadImage(imageData) { result in
                 switch result {
                 case .success(let downloadURL):
                     // Update profile with logo URL
@@ -152,10 +145,10 @@ class EmployerProfileViewModel: ObservableObject {
                         do {
                             try await self.db.collection("employer_profiles")
                                 .document(userId)
-                                .updateData([
+                                .setData([
                                     "logoURL": downloadURL,
                                     "updatedAt": Timestamp(date: Date())
-                                ])
+                                ], merge: true)
                             continuation.resume(returning: downloadURL)
                         } catch {
                             continuation.resume(throwing: error)

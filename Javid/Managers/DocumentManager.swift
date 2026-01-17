@@ -10,6 +10,63 @@ class DocumentManager {
     
     private init() {}
     
+    // MARK: - Upload Image (Logo, etc.)
+    func uploadImage(_ imageData: Data, completion: @escaping (Result<String, Error>) -> Void) {
+        // Create upload URL for images (not raw)
+        let uploadURL = URL(string: "https://api.cloudinary.com/v1_1/\(cloudName)/image/upload")!
+        
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        
+        // Add upload preset
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"upload_preset\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(uploadPreset)\r\n".data(using: .utf8)!)
+        
+        // Add image data
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"logo.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+            
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
+                }
+                return
+            }
+            
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let secureUrl = json["secure_url"] as? String {
+                    DispatchQueue.main.async { completion(.success(secureUrl)) }
+                } else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }.resume()
+    }
+    
     // MARK: - Upload PDF Document (Resume, etc.)
     func uploadDocument(_ documentURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
         guard let documentData = try? Data(contentsOf: documentURL) else {
