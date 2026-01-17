@@ -12,9 +12,10 @@ struct JobApplication: Identifiable, Codable {
     var applicantEmail: String
     var applicantPhone: String
     var coverLetter: String
-    var resumeURL: String
-    var portfolioURL: String?
-    var answers: [String] // Answers to custom questions
+    var resumeURL: String?
+    var portfolioURLs: [String] = [] // Changed from portfolioURL to portfolioURLs
+    var answers: [String] = [] // Answers to custom questions
+    var customAnswers: [String: String] = [:] // Added for question-answer pairs
     var status: ApplicationStatus
     var appliedAt: Date
     var updatedAt: Date
@@ -30,9 +31,10 @@ struct JobApplication: Identifiable, Codable {
         applicantEmail: String,
         applicantPhone: String,
         coverLetter: String,
-        resumeURL: String,
-        portfolioURL: String? = nil,
-        answers: [String] = []
+        resumeURL: String? = nil,
+        portfolioURLs: [String] = [],
+        answers: [String] = [],
+        customAnswers: [String: String] = [:]
     ) {
         self.jobId = jobId
         self.jobTitle = jobTitle
@@ -43,8 +45,9 @@ struct JobApplication: Identifiable, Codable {
         self.applicantPhone = applicantPhone
         self.coverLetter = coverLetter
         self.resumeURL = resumeURL
-        self.portfolioURL = portfolioURL
+        self.portfolioURLs = portfolioURLs
         self.answers = answers
+        self.customAnswers = customAnswers
         self.status = .pending
         self.appliedAt = Date()
         self.updatedAt = Date()

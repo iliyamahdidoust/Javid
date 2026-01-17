@@ -80,8 +80,8 @@ struct JobApplicationsView: View {
                     ScrollView {
                         LazyVStack(spacing: AppSpacing.md) {
                             ForEach(filteredApplications) { application in
-                                NavigationLink(destination: ApplicationDetailView(application: application)) {
-                                    ApplicationCard(application: application)
+                                NavigationLink(destination: UserApplicationDetailView(application: application)) {
+                                    UserApplicationCard(application: application)
                                 }
                                 .buttonStyle(PlainButtonStyle())
                             }
@@ -195,8 +195,8 @@ struct StatusFilterChip: View {
     }
 }
 
-// MARK: - Application Card
-struct ApplicationCard: View {
+// MARK: - User Application Card (Renamed to avoid conflict)
+struct UserApplicationCard: View {
     let application: JobApplication
     @Environment(\.colorScheme) var colorScheme
     
@@ -271,8 +271,8 @@ struct ApplicationCard: View {
     }
 }
 
-// MARK: - Application Detail View (Simple)
-struct ApplicationDetailView: View {
+// MARK: - User Application Detail View (Renamed to avoid conflict)
+struct UserApplicationDetailView: View {
     let application: JobApplication
     @Environment(\.dismiss) var dismiss
     
@@ -310,21 +310,23 @@ struct ApplicationDetailView: View {
                 }
                 
                 // Resume
-                Button(action: {
-                    if let url = URL(string: application.resumeURL) {
-                        UIApplication.shared.open(url)
+                if let resumeURL = application.resumeURL {
+                    Button(action: {
+                        if let url = URL(string: resumeURL) {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "doc.fill")
+                            Text("View Resume")
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                        }
+                        .foregroundColor(AppColors.primary)
+                        .padding()
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
                     }
-                }) {
-                    HStack {
-                        Image(systemName: "doc.fill")
-                        Text("View Resume")
-                        Spacer()
-                        Image(systemName: "arrow.up.right.square")
-                    }
-                    .foregroundColor(AppColors.primary)
-                    .padding()
-                    .background(AppColors.surface)
-                    .cornerRadius(AppRadius.md)
                 }
             }
             .padding(AppSpacing.md)

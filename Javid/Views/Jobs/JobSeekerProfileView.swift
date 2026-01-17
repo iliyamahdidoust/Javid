@@ -503,9 +503,7 @@ struct CertificationCard: View {
                     .font(AppFonts.callout)
                     .foregroundColor(AppColors.textSecondary)
                 
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                Text("Issued: \(formatter.string(from: certification.issueDate))")
+                Text("Issued: \(formattedDate)")
                     .font(AppFonts.caption)
                     .foregroundColor(AppColors.textTertiary)
             }
@@ -515,6 +513,12 @@ struct CertificationCard: View {
         .padding(AppSpacing.md)
         .background(AppColors.surface)
         .cornerRadius(AppRadius.md)
+    }
+    
+    var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: certification.issueDate)
     }
 }
 

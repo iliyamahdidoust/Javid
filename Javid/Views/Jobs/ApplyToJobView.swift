@@ -428,6 +428,10 @@ struct ApplyToJobView: View {
     }
     
     func submitWithResumeURL(_ resumeURL: String, userId: String, userName: String, userEmail: String, jobId: String) {
+        // FIXED: Changed to match new JobApplication model
+        // portfolioURL (String?) -> portfolioURLs ([String])
+        let portfolioURLs: [String] = portfolioURL.isEmpty ? [] : [portfolioURL]
+        
         let application = JobApplication(
             jobId: jobId,
             jobTitle: job.title,
@@ -438,7 +442,7 @@ struct ApplyToJobView: View {
             applicantPhone: phone,
             coverLetter: coverLetter,
             resumeURL: resumeURL,
-            portfolioURL: portfolioURL.isEmpty ? nil : portfolioURL,
+            portfolioURLs: portfolioURLs,  // Changed from portfolioURL
             answers: answers
         )
         

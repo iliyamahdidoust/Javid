@@ -2,275 +2,206 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 import Combine
-import UIKit
 
 class EmployerProfileViewModel: ObservableObject {
-    // MARK: - Published Properties
-    @Published var profile: EmployerProfile?
+    @Published var employerProfile: EmployerProfile?
     @Published var isLoading = false
-    @Published var errorMessage = ""
+    @Published var errorMessage: String?
     
-    // MARK: - Private Properties
     private let db = Firestore.firestore()
-    private var profileListener: ListenerRegistration?
     
-    deinit {
-        profileListener?.remove()
+    init() {
+        fetchEmployerProfile()
     }
     
-    // MARK: - Fetch Profile
-    func fetchProfile() {
-        guard let userId = Auth.auth().currentUser?.uid else {
-            print("User not logged in")
-            return
-        }
+    // MARK: - Fetch Employer Profile
+    func fetchEmployerProfile() {
+        guard let userId = Auth.auth().currentUser?.uid else { return }
         
         isLoading = true
         
-        // Remove previous listener
-        profileListener?.remove()
-        
-        // Add real-time listener
-        profileListener = db.collection("employer_profiles")
-            .whereField("userId", isEqualTo: userId)
+        db.collection("employer_profiles")
+            .document(userId)
             .addSnapshotListener { [weak self] snapshot, error in
                 self?.isLoading = false
                 
                 if let error = error {
-                    self?.errorMessage = "Failed to load profile: \(error.localizedDescription)"
-                    print("❌ Error fetching profile: \(error)")
+                    self?.errorMessage = error.localizedDescription
                     return
                 }
                 
-                guard let document = snapshot?.documents.first else {
-                    print("No employer profile found")
+                guard let snapshot = snapshot, snapshot.exists else {
                     return
                 }
                 
                 do {
-                    let profile = try document.data(as: EmployerProfile.self)
-                    self?.profile = profile
-                    print("✅ Employer profile loaded: \(profile.companyName)")
+                    self?.employerProfile = try snapshot.data(as: EmployerProfile.self)
                 } catch {
-                    print("❌ Error decoding profile: \(error)")
+                    self?.errorMessage = error.localizedDescription
                 }
             }
     }
     
-    // MARK: - Create Profile
-    func createProfile(_ profile: EmployerProfile, completion: @escaping (Bool, String) -> Void) {
+    // MARK: - Create Employer Profile
+    func createEmployerProfile(
+        companyName: String,
+        industry: String,
+        companySize: CompanySize,
+        description: String,
+        website: String,
+        location: String,
+        contactEmail: String,
+        contactPhone: String
+    ) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            completion(false, "You must be logged in")
-            return
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        var newProfile = profile
-        newProfile.userId = userId
+        let profile = EmployerProfile(
+            userId: userId,
+            companyName: companyName,
+            industry: industry,
+            companySize: companySize,
+            description: description,
+            website: website,
+            location: location,
+            contactEmail: contactEmail,
+            contactPhone: contactPhone
+        )
+        
+        try db.collection("employer_profiles")
+            .document(userId)
+            .setData(from: profile)
+    }
+    
+    // MARK: - Update Employer Profile
+    func updateEmployerProfile(
+        companyName: String,
+        industry: String,
+        companySize: CompanySize,
+        description: String,
+        website: String,
+        location: String,
+        contactEmail: String,
+        contactPhone: String
+    ) async throws {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let updates: [String: Any] = [
+            "companyName": companyName,
+            "industry": industry,
+            "companySize": companySize.rawValue,
+            "description": description,
+            "website": website,
+            "location": location,
+            "contactEmail": contactEmail,
+            "contactPhone": contactPhone,
+            "updatedAt": Timestamp(date: Date())
+        ]
+        
+        try await db.collection("employer_profiles")
+            .document(userId)
+            .updateData(updates)
+    }
+    
+    // MARK: - Submit Verification
+    func submitVerification(documents: [String], notes: String) async {
+        guard let userId = Auth.auth().currentUser?.uid else { return }
+        
+        let updates: [String: Any] = [
+            "verificationDocuments": documents,
+            "verificationNotes": notes,
+            "verificationStatus": VerificationStatus.pending.rawValue,
+            "verificationSubmittedAt": Timestamp(date: Date()),
+            "updatedAt": Timestamp(date: Date())
+        ]
         
         do {
-            try db.collection("employer_profiles").addDocument(from: newProfile) { error in
-                if let error = error {
-                    completion(false, "Failed to create profile: \(error.localizedDescription)")
-                } else {
-                    completion(true, "✅ Company profile created successfully!")
-                }
-            }
+            try await db.collection("employer_profiles")
+                .document(userId)
+                .updateData(updates)
         } catch {
-            completion(false, "Failed to encode profile: \(error.localizedDescription)")
-        }
-    }
-    
-    // MARK: - Update Profile
-    func updateProfile(_ profile: EmployerProfile, completion: @escaping (Bool, String) -> Void) {
-        guard let profileId = profile.id else {
-            completion(false, "Invalid profile ID")
-            return
-        }
-        
-        var updatedProfile = profile
-        updatedProfile.updatedAt = Date()
-        
-        do {
-            try db.collection("employer_profiles").document(profileId).setData(from: updatedProfile) { error in
-                if let error = error {
-                    completion(false, "Failed to update profile: \(error.localizedDescription)")
-                } else {
-                    completion(true, "✅ Company profile updated successfully!")
-                }
-            }
-        } catch {
-            completion(false, "Failed to encode profile: \(error.localizedDescription)")
-        }
-    }
-    
-    // MARK: - Submit for Verification
-    func submitForVerification(documents: [UIImage], completion: @escaping (Bool, String) -> Void) {
-        guard var profile = profile else {
-            completion(false, "Profile not loaded")
-            return
-        }
-        
-        guard profile.verificationStatus != .pending && profile.verificationStatus != .verified else {
-            completion(false, "Verification already submitted or approved")
-            return
-        }
-        
-        // Upload documents
-        let group = DispatchGroup()
-        var uploadedURLs: [String] = []
-        
-        for document in documents {
-            group.enter()
-            CloudinaryManager.shared.uploadImage(document) { result in
-                switch result {
-                case .success(let url):
-                    uploadedURLs.append(url)
-                case .failure(let error):
-                    print("❌ Document upload failed: \(error)")
-                }
-                group.leave()
-            }
-        }
-        
-        group.notify(queue: .main) { [weak self] in
-            guard !uploadedURLs.isEmpty else {
-                completion(false, "Failed to upload documents")
-                return
-            }
-            
-            profile.verificationDocuments = uploadedURLs
-            profile.verificationStatus = .pending
-            profile.verificationSubmittedAt = Date()
-            
-            self?.updateProfile(profile) { success, message in
-                if success {
-                    completion(true, "✅ Verification submitted! We'll review within 2-3 business days.")
-                } else {
-                    completion(false, message)
-                }
+            await MainActor.run {
+                self.errorMessage = "Failed to submit verification: \(error.localizedDescription)"
             }
         }
     }
     
-    // MARK: - Upload Company Logo
-    func uploadCompanyLogo(_ image: UIImage, completion: @escaping (String?) -> Void) {
-        CloudinaryManager.shared.uploadImage(image) { result in
-            switch result {
-            case .success(let url):
-                print("✅ Company logo uploaded: \(url)")
-                completion(url)
-            case .failure(let error):
-                print("❌ Upload failed: \(error.localizedDescription)")
-                completion(nil)
-            }
-        }
-    }
-    
-    // MARK: - Upload Cover Photo
-    func uploadCoverPhoto(_ image: UIImage, completion: @escaping (String?) -> Void) {
-        CloudinaryManager.shared.uploadImage(image) { result in
-            switch result {
-            case .success(let url):
-                print("✅ Cover photo uploaded: \(url)")
-                completion(url)
-            case .failure(let error):
-                print("❌ Upload failed: \(error.localizedDescription)")
-                completion(nil)
-            }
-        }
-    }
-    
-    // MARK: - Add Location
-    func addLocation(_ location: CompanyLocation, completion: @escaping (Bool, String) -> Void) {
-        guard var profile = profile else {
-            completion(false, "Profile not loaded")
-            return
-        }
-        
-        profile.locations.append(location)
-        updateProfile(profile, completion: completion)
-    }
-    
-    // MARK: - Remove Location
-    func removeLocation(_ location: CompanyLocation, completion: @escaping (Bool, String) -> Void) {
-        guard var profile = profile else {
-            completion(false, "Profile not loaded")
-            return
-        }
-        
-        profile.locations.removeAll { $0.id == location.id }
-        updateProfile(profile, completion: completion)
-    }
-    
-    // MARK: - Add Benefit
-    func addBenefit(_ benefit: String, completion: @escaping (Bool, String) -> Void) {
-        guard var profile = profile else {
-            completion(false, "Profile not loaded")
-            return
-        }
-        
-        if !profile.benefits.contains(benefit) {
-            profile.benefits.append(benefit)
-            updateProfile(profile, completion: completion)
-        } else {
-            completion(false, "Benefit already exists")
-        }
-    }
-    
-    // MARK: - Remove Benefit
-    func removeBenefit(_ benefit: String, completion: @escaping (Bool, String) -> Void) {
-        guard var profile = profile else {
-            completion(false, "Profile not loaded")
-            return
-        }
-        
-        profile.benefits.removeAll { $0 == benefit }
-        updateProfile(profile, completion: completion)
-    }
-    
-    // MARK: - Check if Profile Exists
-    func checkIfProfileExists(completion: @escaping (Bool) -> Void) {
+    // MARK: - Upload Logo
+    func uploadLogo(imageData: Data) async throws -> String {
         guard let userId = Auth.auth().currentUser?.uid else {
-            completion(false)
-            return
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        db.collection("employer_profiles")
-            .whereField("userId", isEqualTo: userId)
-            .getDocuments { snapshot, error in
-                if error != nil {
-                    completion(false)
-                    return
-                }
+        // Create temporary file
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("logo_\(UUID().uuidString).jpg")
+        try imageData.write(to: tempURL)
+        
+        // Upload to Cloudinary
+        return try await withCheckedThrowingContinuation { continuation in
+            DocumentManager.shared.uploadDocument(tempURL) { result in
+                // Clean up temp file
+                try? FileManager.default.removeItem(at: tempURL)
                 
-                completion(!(snapshot?.documents.isEmpty ?? true))
+                switch result {
+                case .success(let downloadURL):
+                    // Update profile with logo URL
+                    Task {
+                        do {
+                            try await self.db.collection("employer_profiles")
+                                .document(userId)
+                                .updateData([
+                                    "logoURL": downloadURL,
+                                    "updatedAt": Timestamp(date: Date())
+                                ])
+                            continuation.resume(returning: downloadURL)
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
             }
+        }
     }
     
-    // MARK: - Increment Active Jobs Count
-    func incrementActiveJobsCount() {
-        guard let profileId = profile?.id else { return }
+    // MARK: - Delete Profile
+    func deleteEmployerProfile() async throws {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
         
-        db.collection("employer_profiles").document(profileId).updateData([
-            "activeJobsCount": FieldValue.increment(Int64(1))
-        ])
+        try await db.collection("employer_profiles")
+            .document(userId)
+            .delete()
     }
     
-    // MARK: - Decrement Active Jobs Count
-    func decrementActiveJobsCount() {
-        guard let profileId = profile?.id else { return }
-        
-        db.collection("employer_profiles").document(profileId).updateData([
-            "activeJobsCount": FieldValue.increment(Int64(-1))
-        ])
+    // MARK: - Check if User is Employer
+    func isEmployer() -> Bool {
+        return employerProfile != nil
     }
     
-    // MARK: - Increment Total Hires
-    func incrementTotalHires() {
-        guard let profileId = profile?.id else { return }
+    // MARK: - Get Verification Status Message
+    func getVerificationStatusMessage() -> String {
+        guard let profile = employerProfile else {
+            return "Create an employer profile to get started"
+        }
         
-        db.collection("employer_profiles").document(profileId).updateData([
-            "totalHires": FieldValue.increment(Int64(1))
-        ])
+        switch profile.verificationStatus {
+        case .notSubmitted:
+            return "Submit verification documents to get verified"
+        case .pending:
+            return "Your verification is under review. We'll notify you once complete."
+        case .approved:
+            return "Your employer account is verified! ✓"
+        case .rejected:
+            if !profile.verificationNotes.isEmpty {
+                return "Verification rejected: \(profile.verificationNotes)"
+            }
+            return "Verification was rejected. Please contact support."
+        }
     }
 }

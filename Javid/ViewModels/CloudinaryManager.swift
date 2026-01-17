@@ -11,6 +11,7 @@ enum CloudinaryFolder: String {
 enum CloudinaryPreset: String {
     case business = "business_images"
     case marketplace = "marketplace_preset"
+    case profile = "profile_images"
 }
 
 class CloudinaryManager {

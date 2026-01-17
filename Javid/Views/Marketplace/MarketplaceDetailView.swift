@@ -375,7 +375,7 @@ struct MarketplaceDetailView: View {
                 GridItem(.flexible())
             ], spacing: AppSpacing.md) {
                 // Views
-                StatCard(
+                MarketplaceStatCard(
                     icon: "eye.fill",
                     value: "\(item.viewCount)",
                     label: "Views",
@@ -383,7 +383,7 @@ struct MarketplaceDetailView: View {
                 )
                 
                 // Saves
-                StatCard(
+                MarketplaceStatCard(
                     icon: "heart.fill",
                     value: "\(item.savedCount)",
                     label: "Saves",
@@ -391,7 +391,7 @@ struct MarketplaceDetailView: View {
                 )
                 
                 // Days Listed
-                StatCard(
+                MarketplaceStatCard(
                     icon: "calendar",
                     value: "\(daysListed)",
                     label: "Days Listed",
@@ -399,7 +399,7 @@ struct MarketplaceDetailView: View {
                 )
                 
                 // Engagement Rate
-                StatCard(
+                MarketplaceStatCard(
                     icon: "chart.line.uptrend.xyaxis",
                     value: engagementRate,
                     label: "Engagement",
@@ -814,7 +814,7 @@ struct MarketplaceDetailView: View {
 
 // MARK: - Supporting Components
 
-struct StatCard: View {
+struct MarketplaceStatCard: View {
     let icon: String
     let value: String
     let label: String

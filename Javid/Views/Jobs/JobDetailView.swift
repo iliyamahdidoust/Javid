@@ -307,7 +307,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "Required Skills", icon: "wrench.and.screwdriver.fill")
             
-            FlowLayout(spacing: 8) {
+            SkillsFlowLayout(spacing: 8) {
                 ForEach(job.skills, id: \.self) { skill in
                     Text(skill)
                         .font(AppFonts.caption)
@@ -462,8 +462,8 @@ struct QuickInfoCard: View {
     }
 }
 
-// MARK: - Flow Layout (for skills)
-struct FlowLayout: Layout {
+// MARK: - Skills Flow Layout (Renamed to avoid conflict with JobFilterView)
+struct SkillsFlowLayout: Layout {
     var spacing: CGFloat = 8
     
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

@@ -284,30 +284,3 @@ struct MessageBubble: View {
         }
     }
 }
-
-// MARK: - Placeholder Views for Employer (Simple stubs)
-
-struct EmployerProfileView: View {
-    var body: some View {
-        Text("Employer Profile - Coming Soon")
-            .font(AppFonts.title2)
-    }
-}
-
-struct EditEmployerProfileView: View {
-    var body: some View {
-        Text("Edit Employer Profile - Coming Soon")
-    }
-}
-
-struct PostJobView: View {
-    var body: some View {
-        Text("Post Job - Coming Soon")
-    }
-}
-
-struct EmployerJobsView: View {
-    var body: some View {
-        Text("My Posted Jobs - Coming Soon")
-    }
-}

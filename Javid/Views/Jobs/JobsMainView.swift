@@ -11,7 +11,8 @@ struct JobsMainView: View {
     
     @State private var selectedTab = 0 // 0: Browse, 1: Profile, 2: Applications, 3: Messages
     @State private var showingProfileSetup = false
-    @State private var userRole: UserRole = .jobSeeker
+    @State private var userRole: UserRole = .none
+    @State private var isCheckingProfile = true // Track loading state
     
     @Environment(\.colorScheme) var colorScheme
     
@@ -24,49 +25,114 @@ struct JobsMainView: View {
     var body: some View {
         NavigationView {
             if authViewModel.isLoggedIn {
-                VStack(spacing: 0) {
-                    // Custom Tab Bar
-                    customTabBar
-                    
-                    // Content
-                    TabView(selection: $selectedTab) {
-                        JobsBrowseView()
-                            .environmentObject(jobViewModel)
-                            .tag(0)
-                        
-                        if userRole == .jobSeeker {
-                            JobSeekerProfileView()
-                                .environmentObject(jobSeekerProfileVM)
-                                .tag(1)
-                            
-                            JobApplicationsView()
-                                .environmentObject(applicationVM)
-                                .environmentObject(jobViewModel)
-                                .tag(2)
-                        } else if userRole == .employer {
-                            EmployerProfileView()
-                                .environmentObject(employerProfileVM)
-                                .tag(1)
-                            
-                            EmployerJobsView()
-                                .environmentObject(jobViewModel)
-                                .environmentObject(applicationVM)
-                                .tag(2)
-                        }
-                        
-                        JobMessagesView()
-                            .environmentObject(messagingVM)
-                            .tag(3)
+                if isCheckingProfile {
+                    // Show loading while determining user role
+                    VStack {
+                        ProgressView("Loading...")
+                            .padding()
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                }
-                .navigationBarHidden(true)
-                .onAppear {
-                    checkUserProfile()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppColors.background)
+                } else {
+                    VStack(spacing: 0) {
+                        // Custom Tab Bar
+                        customTabBar
+                        
+                        // Content
+                        TabView(selection: $selectedTab) {
+                            // Tab 0: Browse Jobs
+                            JobsBrowseView()
+                                .environmentObject(jobViewModel)
+                                .tag(0)
+                            
+                            // Tab 1: Profile
+                            Group {
+                                if userRole == .jobSeeker {
+                                    JobSeekerProfileView()
+                                        .environmentObject(jobSeekerProfileVM)
+                                } else if userRole == .employer {
+                                    EmployerProfileView()
+                                        .environmentObject(employerProfileVM)
+                                } else {
+                                    // No profile - show setup
+                                    ProfileSetupView(
+                                        jobSeekerProfileVM: jobSeekerProfileVM,
+                                        employerProfileVM: employerProfileVM,
+                                        onRoleSelected: { role in
+                                            userRole = role
+                                            // Fetch data based on role
+                                            if role == .jobSeeker {
+                                                applicationVM.fetchUserApplications()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            .tag(1)
+                            
+                            // Tab 2: Applications/Posted Jobs
+                            Group {
+                                if userRole == .jobSeeker {
+                                    JobApplicationsView()
+                                        .environmentObject(applicationVM)
+                                        .environmentObject(jobViewModel)
+                                } else if userRole == .employer {
+                                    EmployerJobsView()
+                                        .environmentObject(jobViewModel)
+                                        .environmentObject(applicationVM)
+                                        .environmentObject(employerProfileVM)
+                                } else {
+                                    // No profile - redirect to setup
+                                    VStack(spacing: 20) {
+                                        Image(systemName: "person.badge.plus")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(AppColors.primary)
+                                        
+                                        Text("Complete Your Profile")
+                                            .font(AppFonts.title2)
+                                        
+                                        Text("Please set up your profile first")
+                                            .font(AppFonts.body)
+                                            .foregroundColor(AppColors.textSecondary)
+                                        
+                                        Button("Go to Profile") {
+                                            selectedTab = 1
+                                        }
+                                        .font(AppFonts.bodyBold)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 30)
+                                        .padding(.vertical, 12)
+                                        .background(AppColors.primary)
+                                        .cornerRadius(AppRadius.md)
+                                    }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(AppColors.background)
+                                }
+                            }
+                            .tag(2)
+                            
+                            // Tab 3: Messages
+                            JobMessagesView()
+                                .environmentObject(messagingVM)
+                                .tag(3)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                    }
+                    .navigationBarHidden(true)
                 }
             } else {
                 // Not logged in
                 JobsGuestView()
+            }
+        }
+        .onAppear {
+            if authViewModel.isLoggedIn {
+                checkUserProfile()
+            }
+        }
+        .onChange(of: authViewModel.isLoggedIn) { isLoggedIn in
+            if isLoggedIn {
+                checkUserProfile()
             }
         }
     }
@@ -115,30 +181,151 @@ struct JobsMainView: View {
     
     // MARK: - Check User Profile
     func checkUserProfile() {
-        // Check if user has job seeker profile
-        jobSeekerProfileVM.checkIfProfileExists { hasJobSeekerProfile in
-            if hasJobSeekerProfile {
+        isCheckingProfile = true
+        
+        // Fetch profiles - call directly on the StateObject
+        jobSeekerProfileVM.fetchProfile()
+        employerProfileVM.fetchEmployerProfile()
+        
+        // Check profiles after fetch completes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if jobSeekerProfileVM.profile != nil {
                 userRole = .jobSeeker
-                jobSeekerProfileVM.fetchProfile()
                 applicationVM.fetchUserApplications()
+                print("✅ User role: Job Seeker")
+            } else if employerProfileVM.employerProfile != nil {
+                userRole = .employer
+                print("✅ User role: Employer")
             } else {
-                // Check if user has employer profile
-                employerProfileVM.checkIfProfileExists { hasEmployerProfile in
-                    if hasEmployerProfile {
-                        userRole = .employer
-                        employerProfileVM.fetchProfile()
-                    } else {
-                        // No profile, show setup
-                        userRole = .none
-                        showingProfileSetup = true
+                userRole = .none
+                print("⚠️ No profile found - showing setup")
+            }
+            
+            // Fetch common data
+            jobViewModel.fetchJobs()
+            messagingVM.fetchConversations()
+            
+            isCheckingProfile = false
+        }
+    }
+}
+
+// MARK: - Profile Setup View
+struct ProfileSetupView: View {
+    @ObservedObject var jobSeekerProfileVM: JobSeekerProfileViewModel
+    @ObservedObject var employerProfileVM: EmployerProfileViewModel
+    let onRoleSelected: (JobsMainView.UserRole) -> Void
+    
+    @State private var showingJobSeekerSetup = false
+    @State private var showingEmployerSetup = false
+    
+    var body: some View {
+        VStack(spacing: 30) {
+            VStack(spacing: 12) {
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 60))
+                    .foregroundColor(AppColors.primary)
+                
+                Text("Complete Your Profile")
+                    .font(AppFonts.title2)
+                    .foregroundColor(AppColors.textPrimary)
+                
+                Text("Choose how you want to use the jobs platform")
+                    .font(AppFonts.body)
+                    .foregroundColor(AppColors.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            
+            VStack(spacing: 16) {
+                // Job Seeker Option
+                Button(action: { showingJobSeekerSetup = true }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "person.fill")
+                                    .font(.title2)
+                                Text("I'm Looking for a Job")
+                                    .font(AppFonts.bodyBold)
+                            }
+                            
+                            Text("Create your profile, upload resume, and apply to jobs")
+                                .font(AppFonts.caption)
+                                .foregroundColor(AppColors.textSecondary)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(AppColors.textTertiary)
                     }
+                    .padding()
+                    .background(AppColors.surface)
+                    .cornerRadius(AppRadius.md)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.md)
+                            .stroke(AppColors.primary.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .foregroundColor(AppColors.textPrimary)
+                
+                // Employer Option
+                Button(action: { showingEmployerSetup = true }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "building.2.fill")
+                                    .font(.title2)
+                                Text("I'm Hiring")
+                                    .font(AppFonts.bodyBold)
+                            }
+                            
+                            Text("Post jobs, review applications, and find talent")
+                                .font(AppFonts.caption)
+                                .foregroundColor(AppColors.textSecondary)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(AppColors.textTertiary)
+                    }
+                    .padding()
+                    .background(AppColors.surface)
+                    .cornerRadius(AppRadius.md)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.md)
+                            .stroke(AppColors.primary.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .foregroundColor(AppColors.textPrimary)
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+        }
+        .padding()
+        .sheet(isPresented: $showingJobSeekerSetup) {
+            NavigationView {
+                EditJobSeekerProfileView()
+                    .environmentObject(jobSeekerProfileVM)
+            }
+            .onDisappear {
+                if jobSeekerProfileVM.profile != nil {
+                    onRoleSelected(.jobSeeker)
                 }
             }
         }
-        
-        // Fetch common data
-        jobViewModel.fetchJobs()
-        messagingVM.fetchConversations()
+        .sheet(isPresented: $showingEmployerSetup) {
+            NavigationView {
+                EditEmployerProfileView(viewModel: employerProfileVM)
+            }
+            .onDisappear {
+                if employerProfileVM.employerProfile != nil {
+                    onRoleSelected(.employer)
+                }
+            }
+        }
     }
 }
 
