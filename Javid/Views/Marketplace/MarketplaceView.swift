@@ -17,6 +17,7 @@ struct MarketplaceView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var userCity: String = ""
     @State private var userProvince: String = ""
+    @State private var navigateToSellerDashboard = false // NEW: For navigation
     
     @Environment(\.colorScheme) var colorScheme
     
@@ -48,14 +49,9 @@ struct MarketplaceView: View {
         marketplaceViewModel.getUserItems()
     }
     
-//    // Control visibility based on scroll
     var showTabsAndNearby: Bool {
         scrollOffset > -50
     }
-    
-//    var showCategories: Bool {
-//        scrollOffset <= 0
-//    }
     
     var body: some View {
         NavigationView {
@@ -84,8 +80,6 @@ struct MarketplaceView: View {
                             if selectedTab == "browse" {
                                 categoriesSection
                                 browseContent
-                            } else if selectedTab == "sell" {
-                                sellContent
                             } else {
                                 allCategoriesContent
                             }
@@ -95,6 +89,15 @@ struct MarketplaceView: View {
                         await refreshData()
                     }
                 }
+                
+                // HIDDEN NavigationLink for Seller Dashboard
+                NavigationLink(
+                    destination: SellerDashboardView(marketplaceViewModel: marketplaceViewModel),
+                    isActive: $navigateToSellerDashboard
+                ) {
+                    EmptyView()
+                }
+                .hidden()
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingAddItem) {
@@ -127,9 +130,7 @@ struct MarketplaceView: View {
                 Spacer()
                 
                 HStack(spacing: 20) {
-                    Button(action: {
-                        // TODO: Navigate to messages
-                    }) {
+                    NavigationLink(destination: MarketplaceMessagesListView()) {
                         Image(systemName: "message.fill")
                             .font(.system(size: 24, weight: .regular))
                             .foregroundColor(AppColors.primary)
@@ -170,8 +171,11 @@ struct MarketplaceView: View {
                     isSelected: selectedTab == "sell"
                 ) {
                     if authViewModel.isLoggedIn {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            selectedTab = "sell"
+                        // Navigate directly to Seller Dashboard
+                        navigateToSellerDashboard = true
+                        // Reset selectedTab back to browse so it doesn't stay highlighted
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            selectedTab = "browse"
                         }
                     }
                 }
@@ -357,60 +361,6 @@ struct MarketplaceView: View {
                 }
             }
         }
-    }
-    
-    // MARK: - Sell Content
-    
-    var sellContent: some View {
-        NavigationLink(destination: SellerDashboardView(marketplaceViewModel: marketplaceViewModel)) {
-            VStack(spacing: 24) {
-                Spacer()
-                
-                ZStack {
-                    Circle()
-                        .fill(AppColors.primary.opacity(0.12))
-                        .frame(width: 120, height: 120)
-                    
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(AppColors.primary)
-                }
-                
-                VStack(spacing: 12) {
-                    Text("Seller Dashboard")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(AppColors.textPrimary)
-                    
-                    Text("Manage your listings and track performance")
-                        .font(.system(size: 16))
-                        .foregroundColor(AppColors.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                }
-                
-                HStack(spacing: 8) {
-                    Text("Open Dashboard")
-                        .font(.system(size: 17, weight: .semibold))
-                    
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 32)
-                .padding(.vertical, 14)
-                .background(
-                    LinearGradient(
-                        colors: [AppColors.primary, AppColors.primaryDark],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing)
-                )
-                .cornerRadius(AppRadius.md)
-                .shadow(color: AppColors.primary.opacity(0.3), radius: 8, x: 0, y: 4)
-                
-                Spacer()
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - All Categories Content

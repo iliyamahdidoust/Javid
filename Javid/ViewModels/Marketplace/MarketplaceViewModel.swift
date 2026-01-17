@@ -13,7 +13,7 @@ class MarketplaceViewModel: ObservableObject {
     @Published var errorMessage = ""
     @Published var hasMoreData = true
     @Published var savedItemIds: Set<String> = []
-    @Published var userItems: [MarketplaceItem] = [] // ✅ NEW: Store user items separately
+    @Published var userItems: [MarketplaceItem] = [] // ✅ Store user items separately
 
     
     // Filter properties
@@ -54,10 +54,12 @@ class MarketplaceViewModel: ObservableObject {
         savesListener?.remove()
         saveViewedItems()
     }
+    
     func removeUserItemsListener() {
         userItemsListener?.remove()
         userItemsListener = nil
     }
+    
     // MARK: - Load/Save Viewed Items (Persistent across app launches)
     
     private func loadViewedItems() {
@@ -312,10 +314,18 @@ class MarketplaceViewModel: ObservableObject {
         newItem.sellerId = userId
         
         do {
-            try db.collection("marketplace_items").document(item.id ?? UUID().uuidString).setData(from: newItem) { error in
+            let docRef = db.collection("marketplace_items").document(item.id ?? UUID().uuidString)
+            try docRef.setData(from: newItem) { error in
                 if let error = error {
                     completion(false, "Failed to add item: \(error.localizedDescription)")
                 } else {
+                    // ✅ FIXED: Immediately add to userItems array
+                    DispatchQueue.main.async {
+                        if !self.userItems.contains(where: { $0.id == newItem.id }) {
+                            self.userItems.insert(newItem, at: 0)
+                            print("✅ Added item to userItems array")
+                        }
+                    }
                     completion(true, "✅ Item listed successfully!")
                 }
             }
@@ -332,10 +342,17 @@ class MarketplaceViewModel: ObservableObject {
         }
         
         do {
-            try db.collection("marketplace_items").document(itemId).setData(from: item) { error in
+            try db.collection("marketplace_items").document(itemId).setData(from: item, merge: true) { error in
                 if let error = error {
                     completion(false, "Failed to update item: \(error.localizedDescription)")
                 } else {
+                    // ✅ FIXED: Update in userItems array
+                    DispatchQueue.main.async {
+                        if let index = self.userItems.firstIndex(where: { $0.id == itemId }) {
+                            self.userItems[index] = item
+                            print("✅ Updated item in userItems array")
+                        }
+                    }
                     completion(true, "✅ Item updated successfully!")
                 }
             }
@@ -375,6 +392,11 @@ class MarketplaceViewModel: ObservableObject {
                 if let error = error {
                     completion(false, "Failed to delete item: \(error.localizedDescription)")
                 } else {
+                    // ✅ FIXED: Remove from userItems array
+                    DispatchQueue.main.async {
+                        self.userItems.removeAll { $0.id == itemId }
+                        print("✅ Removed item from userItems array")
+                    }
                     completion(true, "✅ Item deleted successfully!")
                 }
             }
@@ -396,6 +418,17 @@ class MarketplaceViewModel: ObservableObject {
             } else {
                 // ✅ Remove from main feed immediately
                 self.items.removeAll { $0.id == itemId }
+                
+                // ✅ FIXED: Update in userItems array
+                DispatchQueue.main.async {
+                    if let index = self.userItems.firstIndex(where: { $0.id == itemId }) {
+                        var updatedItem = self.userItems[index]
+                        updatedItem.isSold = true
+                        self.userItems[index] = updatedItem
+                        print("✅ Marked item as sold in userItems array")
+                    }
+                }
+                
                 completion(true, "✅ Marked as sold!")
             }
         }
@@ -416,35 +449,56 @@ class MarketplaceViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Get User Items (INCLUDING SOLD ITEMS - For Profile View)
+    // MARK: - Get User Items (INCLUDING SOLD ITEMS - For Profile View) - FIXED
     func fetchUserItems(completion: @escaping (Result<[MarketplaceItem], Error>) -> Void) {
         guard let userId = Auth.auth().currentUser?.uid else {
             completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "No user logged in"])))
             return
         }
         
+        print("🔍 Fetching user items for userId: \(userId)")
+        
         // Remove old listener if exists
         userItemsListener?.remove()
         
-        // Set up real-time listener
-        userItemsListener = db.collection("marketplace")
+        // ✅ FIXED: Correct collection name "marketplace_items"
+        userItemsListener = db.collection("marketplace_items")
             .whereField("sellerId", isEqualTo: userId)
             .order(by: "createdAt", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
                 if let error = error {
+                    print("❌ Error fetching user items: \(error.localizedDescription)")
                     completion(.failure(error))
                     return
                 }
                 
-                self.userItems = snapshot?.documents.compactMap { doc in
-                    try? doc.data(as: MarketplaceItem.self)
-                } ?? []
+                guard let documents = snapshot?.documents else {
+                    print("⚠️ No documents found for user")
+                    self.userItems = []
+                    completion(.success([]))
+                    return
+                }
                 
+                print("📦 Found \(documents.count) documents for user")
+                
+                self.userItems = documents.compactMap { doc in
+                    do {
+                        let item = try doc.data(as: MarketplaceItem.self)
+                        print("✅ Decoded item: \(item.title)")
+                        return item
+                    } catch {
+                        print("❌ Error decoding item: \(error)")
+                        return nil
+                    }
+                }
+                
+                print("✅ Total userItems loaded: \(self.userItems.count)")
                 completion(.success(self.userItems))
             }
     }
+    
     // MARK: - Get User Items (Quick access)
     func getUserItems() -> [MarketplaceItem] {
         return userItems

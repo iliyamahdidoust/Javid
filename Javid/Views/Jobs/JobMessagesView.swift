@@ -39,8 +39,8 @@ struct JobMessagesView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(messagingVM.conversations) { conversation in
-                                NavigationLink(destination: ChatView(conversation: conversation)) {
-                                    ConversationRow(conversation: conversation)
+                                NavigationLink(destination: JobChatView(conversation: conversation)) {
+                                    JobConversationRow(conversation: conversation)
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 
@@ -86,8 +86,8 @@ struct JobMessagesView: View {
     }
 }
 
-// MARK: - Conversation Row
-struct ConversationRow: View {
+// MARK: - Job Conversation Row
+struct JobConversationRow: View {
     let conversation: Conversation
     
     var otherPartyName: String {
@@ -150,8 +150,8 @@ struct ConversationRow: View {
     }
 }
 
-// MARK: - Chat View
-struct ChatView: View {
+// MARK: - Job Chat View
+struct JobChatView: View {
     let conversation: Conversation
     
     @EnvironmentObject var messagingVM: JobMessagingViewModel
@@ -177,7 +177,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messagingVM.messages) { message in
-                            MessageBubble(message: message)
+                            JobMessageBubble(message: message)
                                 .id(message.id)
                         }
                     }
@@ -245,8 +245,8 @@ struct ChatView: View {
     }
 }
 
-// MARK: - Message Bubble
-struct MessageBubble: View {
+// MARK: - Job Message Bubble
+struct JobMessageBubble: View {
     let message: JobMessage
     
     var isCurrentUser: Bool {

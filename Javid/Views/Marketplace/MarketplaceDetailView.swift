@@ -13,8 +13,16 @@ struct MarketplaceDetailView: View {
     @State private var alertMessage = ""
     @State private var showingShareSheet = false
     @State private var showingMarkAsSoldAlert = false
+    // ❌ REMOVED: @State private var showingMessageSheet = false
+    
+    // ✅ NEW: Message sending states
+    @StateObject private var messagingViewModel = MessagingViewModel()
+    @State private var isSendingMessage = false
+    @State private var messageSent = false
+    
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @EnvironmentObject var authViewModel: AuthViewModel
     
     var isOwner: Bool {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
@@ -113,6 +121,7 @@ struct MarketplaceDetailView: View {
         .sheet(isPresented: $showingEditSheet) {
             EditMarketplaceItemView(item: item, marketplaceViewModel: marketplaceViewModel)
         }
+        // ❌ REMOVED: .sheet(isPresented: $showingMessageSheet) { ContactSellerView(item: item) }
         .alert("Delete Item", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -137,6 +146,25 @@ struct MarketplaceDetailView: View {
             }
         } message: {
             Text(alertMessage)
+        }
+        .overlay {
+            // ✅ NEW: Loading overlay when sending message
+            if isSendingMessage {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Sending message...")
+                            .foregroundColor(.white)
+                    }
+                    .padding(32)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(16)
+                }
+            }
         }
     }
     
@@ -222,6 +250,64 @@ struct MarketplaceDetailView: View {
                         .padding(.vertical, 6)
                         .background(Color.red)
                         .cornerRadius(AppRadius.sm)
+                }
+            }
+            
+            // ✅ UPDATED: Direct Message Box (Only for non-owners)
+            if !isOwner {
+                VStack(spacing: 0) {
+                    Divider()
+                        .padding(.vertical, 16)
+                    
+                    HStack(spacing: 12) {
+                        Image(systemName: "message.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(AppColors.primary)
+                        
+                        Text("Message seller")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(AppColors.textPrimary)
+                        
+                        Spacer()
+                    }
+                    .padding(.bottom, 12)
+                    
+                    HStack(spacing: 12) {
+                        Text("Hello, is this still available?")
+                            .font(.system(size: 16))
+                            .foregroundColor(AppColors.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(colorScheme == .dark ? Color(white: 0.2) : Color(white: 0.95))
+                            )
+                        
+                        // ✅ UPDATED: Send button changes to "Sent" with green color after sending
+                        Button(action: sendDirectMessage) {
+                            HStack(spacing: 6) {
+                                if messageSent {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Text("Sent")
+                                        .font(.system(size: 17, weight: .semibold))
+                                } else {
+                                    Text("Send")
+                                        .font(.system(size: 17, weight: .semibold))
+                                }
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 14)
+                            .background(messageSent ? AppColors.success : AppColors.primary)
+                            .cornerRadius(12)
+                        }
+                        .disabled(isSendingMessage || messageSent)
+                    }
+                    
+                    Divider()
+                        .padding(.top, 16)
                 }
             }
         }
@@ -328,33 +414,9 @@ struct MarketplaceDetailView: View {
                     Text(item.sellerName)
                         .font(AppFonts.bodyBold)
                         .foregroundColor(AppColors.textPrimary)
-                    
-                    Text(item.sellerEmail)
-                        .font(AppFonts.caption)
-                        .foregroundColor(AppColors.textSecondary)
                 }
                 
                 Spacer()
-                
-                // Contact Button
-                if !isOwner {
-                    Button(action: {
-                        contactSeller()
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "message.fill")
-                                .font(.system(size: 14))
-                            Text("Contact")
-                                .font(AppFonts.callout)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, AppSpacing.md)
-                        .padding(.vertical, 10)
-                        .background(AppColors.primary)
-                        .cornerRadius(AppRadius.full)
-                    }
-                }
             }
             .padding(AppSpacing.md)
             .background(AppColors.surface)
@@ -465,7 +527,7 @@ struct MarketplaceDetailView: View {
                             Spacer()
                             
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 14))
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(AppColors.textTertiary)
                         }
                         .padding(AppSpacing.md)
@@ -733,6 +795,57 @@ struct MarketplaceDetailView: View {
         }
     }
     
+    // MARK: - ✅ NEW: Send Direct Message Function
+    
+    func sendDirectMessage() {
+        guard let currentUser = Auth.auth().currentUser,
+              let currentUserName = currentUser.displayName,
+              let currentUserEmail = currentUser.email else {
+            alertMessage = "Please login to send messages"
+            showingAlert = true
+            return
+        }
+        
+        // Check if trying to message yourself
+        if currentUser.uid == item.sellerId {
+            alertMessage = "You cannot message yourself about your own item"
+            showingAlert = true
+            return
+        }
+        
+        isSendingMessage = true
+        
+        messagingViewModel.createOrGetConversation(
+            item: item,
+            currentUserId: currentUser.uid,
+            currentUserName: currentUserName,
+            currentUserEmail: currentUserEmail
+        ) { result in
+            DispatchQueue.main.async {
+                isSendingMessage = false
+                
+                switch result {
+                case .success(let conversation):
+                    print("✅ Conversation ready and message sent: \(conversation.id ?? "unknown")")
+                    
+                    // ✅ Show success state - button turns green with checkmark
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        messageSent = true
+                    }
+                    
+                    // ✅ Provide haptic feedback
+                    let notification = UINotificationFeedbackGenerator()
+                    notification.notificationOccurred(.success)
+                    
+                case .failure(let error):
+                    print("❌ Failed to create conversation: \(error.localizedDescription)")
+                    alertMessage = error.localizedDescription
+                    showingAlert = true
+                }
+            }
+        }
+    }
+    
     // MARK: - Helper Functions
     
     func deleteItem() {
@@ -746,12 +859,6 @@ struct MarketplaceDetailView: View {
         marketplaceViewModel.markAsSold(item) { success, message in
             alertMessage = message
             showingAlert = true
-        }
-    }
-    
-    func contactSeller() {
-        if let url = URL(string: "mailto:\(item.sellerEmail)") {
-            UIApplication.shared.open(url)
         }
     }
     
