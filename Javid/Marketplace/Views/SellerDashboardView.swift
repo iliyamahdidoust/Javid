@@ -8,7 +8,6 @@ struct SellerDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
     
     @State private var selectedSection: DashboardSection = .overview
-    @State private var showingAddItem = false
     
     enum DashboardSection: String, CaseIterable {
         case overview = "Overview"
@@ -77,9 +76,6 @@ struct SellerDashboardView: View {
             }
         }
         .navigationBarHidden(true)
-        .sheet(isPresented: $showingAddItem) {
-            AddMarketplaceItemView(marketplaceViewModel: marketplaceViewModel)
-        }
         .onAppear {
             marketplaceViewModel.fetchUserItems { _ in }
         }
@@ -110,7 +106,7 @@ struct SellerDashboardView: View {
                 
                 Spacer()
                 
-                Button(action: { showingAddItem = true }) {
+                NavigationLink(destination: AddMarketplaceItemView(marketplaceViewModel: marketplaceViewModel)) {
                     HStack(spacing: 6) {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 20))
@@ -130,6 +126,7 @@ struct SellerDashboardView: View {
                     .cornerRadius(AppRadius.full)
                     .shadow(color: AppColors.primary.opacity(0.3), radius: 6, x: 0, y: 3)
                 }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
@@ -240,14 +237,40 @@ struct SellerDashboardView: View {
                     .padding(.horizontal, 20)
                 
                 VStack(spacing: 12) {
-                    QuickActionButton(
-                        icon: "plus.circle.fill",
-                        title: "Create New Listing",
-                        subtitle: "List an item for sale",
-                        color: AppColors.primary
-                    ) {
-                        showingAddItem = true
+                    NavigationLink(destination: AddMarketplaceItemView(marketplaceViewModel: marketplaceViewModel)) {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: AppRadius.md)
+                                    .fill(AppColors.primary.opacity(0.15))
+                                    .frame(width: 50, height: 50)
+                                
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundColor(AppColors.primary)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Create New Listing")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(AppColors.textPrimary)
+                                
+                                Text("List an item for sale")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(AppColors.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(AppColors.textTertiary)
+                        }
+                        .padding(16)
+                        .background(AppColors.surface)
+                        .cornerRadius(AppRadius.md)
+                        .shadow(color: colorScheme == .dark ? Color.clear : AppShadow.small, radius: 4, x: 0, y: 2)
                     }
+                    .buttonStyle(PlainButtonStyle())
                     
                     QuickActionButton(
                         icon: "chart.bar.fill",
@@ -444,7 +467,7 @@ struct SellerDashboardView: View {
                 .foregroundColor(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
             
-            Button(action: { showingAddItem = true }) {
+            NavigationLink(destination: AddMarketplaceItemView(marketplaceViewModel: marketplaceViewModel)) {
                 Text("Create Listing")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.white)
@@ -453,6 +476,7 @@ struct SellerDashboardView: View {
                     .background(AppColors.primary)
                     .cornerRadius(AppRadius.md)
             }
+            .buttonStyle(PlainButtonStyle())
             
             Spacer()
         }

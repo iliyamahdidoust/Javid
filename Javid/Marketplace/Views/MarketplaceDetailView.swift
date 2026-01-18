@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import FirebaseAuth
+import FirebaseFirestore
 
 struct MarketplaceDetailView: View {
     let item: MarketplaceItem
@@ -13,7 +14,6 @@ struct MarketplaceDetailView: View {
     @State private var alertMessage = ""
     @State private var showingShareSheet = false
     @State private var showingMarkAsSoldAlert = false
-    // ❌ REMOVED: @State private var showingMessageSheet = false
     
     // ✅ NEW: Message sending states
     @StateObject private var messagingViewModel = MessagingViewModel()
@@ -55,6 +55,15 @@ struct MarketplaceDetailView: View {
                     VStack(spacing: AppSpacing.lg) {
                         // Header Section
                         headerSection
+                        
+                        // ✅ NEW: Status Section (show for owners)
+                        if isOwner {
+                            Divider()
+                                .padding(.horizontal, AppSpacing.md)
+                            
+                            statusSection
+                                .padding(.horizontal, AppSpacing.md)
+                        }
                         
                         Divider()
                             .padding(.horizontal, AppSpacing.md)
@@ -117,11 +126,24 @@ struct MarketplaceDetailView: View {
             if !isOwner, let itemId = item.id {
                 marketplaceViewModel.incrementViewCount(for: itemId)
             }
+            
+            // ✅ NEW: Auto-update status after 5 minutes
+            if isOwner && item.listingStatus == "under_review" {
+                let timeElapsed = Date().timeIntervalSince(item.statusUpdatedAt)
+                if timeElapsed >= 300 { // 5 minutes
+                    updateStatusToActive()
+                } else {
+                    // Schedule update
+                    let remainingTime = 300 - timeElapsed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
+                        updateStatusToActive()
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showingEditSheet) {
             EditMarketplaceItemView(item: item, marketplaceViewModel: marketplaceViewModel)
         }
-        // ❌ REMOVED: .sheet(isPresented: $showingMessageSheet) { ContactSellerView(item: item) }
         .alert("Delete Item", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -312,6 +334,106 @@ struct MarketplaceDetailView: View {
             }
         }
         .padding(.horizontal, AppSpacing.md)
+    }
+    
+    // MARK: - Status Section
+    
+    var statusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Listing Status")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(AppColors.textSecondary)
+            
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 20))
+                        .foregroundColor(statusColor)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(statusText)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(AppColors.textPrimary)
+                    
+                    Text(statusDescription)
+                        .font(.system(size: 13))
+                        .foregroundColor(AppColors.textSecondary)
+                }
+                
+                Spacer()
+            }
+            .padding(16)
+            .background(statusColor.opacity(0.05))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(statusColor.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+    
+    var statusText: String {
+        switch item.listingStatus {
+        case "under_review":
+            return "Under Review"
+        case "active":
+            return "Active"
+        case "sold":
+            return "Sold"
+        default:
+            return "Unknown"
+        }
+    }
+    
+    var statusDescription: String {
+        switch item.listingStatus {
+        case "under_review":
+            let timeRemaining = max(0, 300 - Int(Date().timeIntervalSince(item.statusUpdatedAt)))
+            let minutes = timeRemaining / 60
+            let seconds = timeRemaining % 60
+            if timeRemaining > 0 {
+                return "Your listing is being reviewed • \(minutes):\(String(format: "%02d", seconds)) remaining"
+            } else {
+                return "Review complete • Activating..."
+            }
+        case "active":
+            return "Your listing is live and visible to buyers"
+        case "sold":
+            return "This item has been sold"
+        default:
+            return ""
+        }
+    }
+    
+    var statusColor: Color {
+        switch item.listingStatus {
+        case "under_review":
+            return AppColors.warning
+        case "active":
+            return AppColors.success
+        case "sold":
+            return AppColors.textSecondary
+        default:
+            return AppColors.textTertiary
+        }
+    }
+    
+    var statusIcon: String {
+        switch item.listingStatus {
+        case "under_review":
+            return "clock.fill"
+        case "active":
+            return "checkmark.circle.fill"
+        case "sold":
+            return "tag.fill"
+        default:
+            return "questionmark.circle.fill"
+        }
     }
     
     // MARK: - Description Section
@@ -862,6 +984,26 @@ struct MarketplaceDetailView: View {
         }
     }
     
+    func updateStatusToActive() {
+        guard let itemId = item.id,
+              item.listingStatus == "under_review" else {
+            return
+        }
+        
+        let db = Firestore.firestore()
+        
+        db.collection("marketplace_items").document(itemId).updateData([
+            "listingStatus": "active",
+            "statusUpdatedAt": Timestamp(date: Date())
+        ]) { error in
+            if let error = error {
+                print("❌ Failed to update status: \(error.localizedDescription)")
+            } else {
+                print("✅ Listing status updated to active")
+            }
+        }
+    }
+    
     func shareListing() {
         let text = """
         Check out this listing: \(item.title)
@@ -926,6 +1068,7 @@ struct MarketplaceStatCard: View {
     let value: String
     let label: String
     let color: Color
+    var isWide: Bool = false
     
     var body: some View {
         VStack(spacing: 8) {

@@ -8,7 +8,6 @@ struct MarketplaceView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     
     @State private var selectedCategory: MarketplaceCategory? = nil
-    @State private var showingAddItem = false
     @State private var showingFilters = false
     @State private var isRefreshing = false
     @State private var showingLocationPermission = false
@@ -17,7 +16,6 @@ struct MarketplaceView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var userCity: String = ""
     @State private var userProvince: String = ""
-    @State private var navigateToSellerDashboard = false // NEW: For navigation
     
     @Environment(\.colorScheme) var colorScheme
     
@@ -89,20 +87,8 @@ struct MarketplaceView: View {
                         await refreshData()
                     }
                 }
-                
-                // HIDDEN NavigationLink for Seller Dashboard
-                NavigationLink(
-                    destination: SellerDashboardView(marketplaceViewModel: marketplaceViewModel),
-                    isActive: $navigateToSellerDashboard
-                ) {
-                    EmptyView()
-                }
-                .hidden()
             }
             .navigationBarHidden(true)
-            .sheet(isPresented: $showingAddItem) {
-                AddMarketplaceItemView(marketplaceViewModel: marketplaceViewModel)
-            }
             .onAppear {
                 requestLocationIfNeeded()
                 if authViewModel.isLoggedIn {
@@ -166,19 +152,23 @@ struct MarketplaceView: View {
                     }
                 }
                 
-                CompactTabButton(
-                    title: "Sell",
-                    isSelected: selectedTab == "sell"
-                ) {
-                    if authViewModel.isLoggedIn {
-                        // Navigate directly to Seller Dashboard
-                        navigateToSellerDashboard = true
-                        // Reset selectedTab back to browse so it doesn't stay highlighted
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            selectedTab = "browse"
-                        }
+                // ✅ UPDATED: Navigate to Seller Dashboard (not Add Item directly)
+                NavigationLink(destination: SellerDashboardView(marketplaceViewModel: marketplaceViewModel)) {
+                    HStack(spacing: 6) {
+                        Text("Sell")
+                            .font(.system(size: 15, weight: selectedTab == "sell" ? .semibold : .medium))
                     }
+                    .foregroundColor(selectedTab == "sell" ? .white : AppColors.textPrimary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        selectedTab == "sell"
+                            ? AppColors.primary
+                            : (colorScheme == .dark ? Color(white: 0.2) : Color(white: 0.95))
+                    )
+                    .cornerRadius(AppRadius.full)
                 }
+                .buttonStyle(PlainButtonStyle())
                 
                 CompactTabButton(
                     title: "Categories",

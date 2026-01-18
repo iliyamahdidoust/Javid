@@ -16,9 +16,22 @@
 		45F48AE62F13261C000F0084 /* Javid.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Javid.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		451266D92F1C3F2D00DB3B51 /* Exceptions for "Javid" folder in "Javid" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 45F48AA62F12FD99000F0084 /* Javid */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		45F48AA92F12FD99000F0084 /* Javid */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				451266D92F1C3F2D00DB3B51 /* Exceptions for "Javid" folder in "Javid" target */,
+			);
 			path = Javid;
 			sourceTree = "<group>";
 		};

@@ -22,6 +22,8 @@ struct MarketplaceItem: Identifiable, Codable {
     var viewCount: Int = 0
     var savedCount: Int = 0
     var createdAt: Date
+    var listingStatus: String = "under_review" // "under_review", "active", "sold"
+    var statusUpdatedAt: Date = Date()
     
     // Computed property for coordinate
     var coordinate: CLLocationCoordinate2D {
@@ -52,7 +54,9 @@ struct MarketplaceItem: Identifiable, Codable {
         isSold: Bool = false,
         viewCount: Int = 0,
         savedCount: Int = 0,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        listingStatus: String = "under_review",  // NEW
+        statusUpdatedAt: Date = Date()           // NEW
     ) {
         self.id = id
         self.title = title
@@ -72,6 +76,8 @@ struct MarketplaceItem: Identifiable, Codable {
         self.viewCount = viewCount
         self.savedCount = savedCount
         self.createdAt = createdAt
+        self.listingStatus = listingStatus      // NEW
+        self.statusUpdatedAt = statusUpdatedAt  // NEW
     }
 }
 
