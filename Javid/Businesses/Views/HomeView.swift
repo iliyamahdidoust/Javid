@@ -3,407 +3,483 @@ import CoreLocation
 import MapKit
 
 struct HomeView: View {
+    // MARK: - Dependencies
     @ObservedObject var businessViewModel: BusinessViewModel
     @EnvironmentObject var favoriteViewModel: FavoriteViewModel
     @StateObject private var locationManager = LocationManager()
     
-    // UI State
+    // MARK: - UI State
     @State private var selectedCategory: String?
-    @State private var viewMode: ViewMode = .list
+    @State private var viewMode: ViewMode = .card
     @State private var activeFilter: QuickFilter = .all
     @State private var sortBy: SortOption = .distance
-    @State private var showingMapView = false
     @State private var scrollOffset: CGFloat = 0
     @State private var headerOpacity: Double = 0
+    @State private var showingMapView = false
     @State private var showSearchSheet = false
     @State private var showFilterSheet = false
     @State private var selectedBusiness: Business?
-    @State private var showBusinessDetail = false
+    @State private var isRefreshing = false
+    @State private var showWelcomeAnimation = false
     
-    // Advanced filters
+    // MARK: - Advanced Filters
     @State private var minRating: Double = 0
     @State private var maxDistance: Double = 50
     @State private var priceRange: Set<String> = []
-    @State private var isOpenNow: Bool = false
+    @State private var isOpenNowFilter: Bool = false
+    @State private var hasAmenities: Set<String> = []
     
-    enum ViewMode { case list, grid, compact }
-    enum QuickFilter { case all, openNow, topRated, nearby, trending }
-    enum SortOption { case distance, rating, reviewCount, newest }
+    // MARK: - Recently Viewed & Personalization
+    @State private var recentlyViewed: [Business] = []
+    @AppStorage("recentlyViewedIds") private var recentlyViewedIds: String = ""
+    @AppStorage("searchHistory") private var searchHistoryString: String = ""
     
+    // MARK: - Enums
+    enum ViewMode: String {
+        case card = "Card"
+        case list = "List"
+        case grid = "Grid"
+        
+        var icon: String {
+            switch self {
+            case .card: return "rectangle.portrait.fill"
+            case .list: return "list.bullet"
+            case .grid: return "square.grid.2x2"
+            }
+        }
+    }
+    
+    enum QuickFilter: String, CaseIterable {
+        case all = "All"
+        case openNow = "Open Now"
+        case topRated = "Top Rated"
+        case nearby = "Nearby"
+        case trending = "Trending"
+        case favorites = "Favorites"
+        
+        var icon: String {
+            switch self {
+            case .all: return "square.grid.2x2.fill"
+            case .openNow: return "clock.fill"
+            case .topRated: return "star.fill"
+            case .nearby: return "location.fill"
+            case .trending: return "flame.fill"
+            case .favorites: return "heart.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .all: return .blue
+            case .openNow: return .green
+            case .topRated: return .orange
+            case .nearby: return .purple
+            case .trending: return .red
+            case .favorites: return .pink
+            }
+        }
+    }
+    
+    enum SortOption: String, CaseIterable {
+        case distance = "Distance"
+        case rating = "Rating"
+        case reviewCount = "Most Reviewed"
+        case newest = "Newest"
+        case alphabetical = "A-Z"
+        
+        var icon: String {
+            switch self {
+            case .distance: return "location.circle.fill"
+            case .rating: return "star.circle.fill"
+            case .reviewCount: return "text.bubble.fill"
+            case .newest: return "clock.fill"
+            case .alphabetical: return "textformat.abc"
+            }
+        }
+    }
+    
+    // MARK: - Body
     var body: some View {
-        let _ = print("DEBUG: Business count = \(businessViewModel.businesses.count)")
-        let _ = print("DEBUG: Filtered count = \(filteredAndSortedBusinesses.count)")
-
         NavigationView {
             ZStack {
-                // Animated background with gradient
-                AnimatedBackground()
+                // Premium Background
+                backgroundView
                 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         // Hero Section with Parallax
                         heroSection
-                            .offset(y: scrollOffset * 0.5)
+                            .offset(y: max(scrollOffset * 0.5, -100))
+                            .opacity(1 - min(max(headerOpacity, 0), 0.5))
+                            .zIndex(1)
                         
                         VStack(spacing: 24) {
-                            // Stats Overview
-                            statsOverview
                             
-                            // Quick Actions
+                            // Quick Action Cards
                             quickActionsSection
                             
-                            // Quick Filters with Haptic
-                            quickFiltersSection
+                            // Smart Filter Chips
+                            filterChipsSection
                             
-                            // Featured/Trending Carousel
+                            // Featured Carousel
                             if !featuredBusinesses.isEmpty {
                                 featuredCarousel
                             }
                             
-                            // Categories with Icons
+                            // Recommended for You
+                            if !recommendedBusinesses.isEmpty && activeFilter == .all {
+                                recommendedSection
+                            }
+                            
+                            // Recently Viewed
+                            if !recentlyViewed.isEmpty && activeFilter == .all {
+                                recentlyViewedSection
+                            }
+                            
+                            // Category Grid
                             categorySection
                             
-                            // Sort & View Mode
-                            sortAndViewSection
+                            // Sort & View Controls
+                            controlsSection
                             
                             // Main Business List
                             businessListSection
                             
+                            // Load More
+                            if businessViewModel.hasMoreData {
+                                loadMoreSection
+                            }
                         }
                         .padding(.top, 20)
                     }
                 }
                 .coordinateSpace(name: "scroll")
-                .overlay(
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: HomeScrollOffsetPreferenceKey.self,
-                            value: geometry.frame(in: .named("scroll")).minY
-                        )
-                    }
-                )
-                .onPreferenceChange(HomeScrollOffsetPreferenceKey.self) { value in
-                    scrollOffset = value
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        headerOpacity = min(max(-value / 100, 0), 1)
-                    }
+                .overlay(scrollTracker)
+                .refreshable {
+                    await performRefresh()
                 }
                 
                 // Floating Action Button
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        floatingActionButton
-                            .padding(.trailing, 20)
-                            .padding(.bottom, 20)
-                    }
-                }
+                floatingActionButton
                 
-                // Loading overlay
+                // Loading Overlay
                 if businessViewModel.isLoading && businessViewModel.businesses.isEmpty {
-                    modernLoadingView
+                    loadingOverlay
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        Text("Discover")
-                            .font(.headline)
-                            .fontWeight(.bold)
-                        if let location = locationManager.location {
-                            Text("Toronto, ON")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .opacity(headerOpacity)
+                    compactHeader
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Menu {
-                        Button(action: { showSearchSheet.toggle() }) {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                        Button(action: { showFilterSheet.toggle() }) {
-                            Label("Filters", systemImage: "slider.horizontal.3")
-                        }
-                        Button(action: { showingMapView.toggle() }) {
-                            Label("Map View", systemImage: "map")
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.system(size: 20))
-                            .foregroundColor(.primary)
-                    }
+                    menuButton
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button(action: { toggleViewMode() }) {
-                            Image(systemName: viewModeIcon)
-                                .font(.system(size: 18))
-                                .foregroundColor(.primary)
-                        }
-                        
-                        NavigationLink(destination: NotificationView()) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "bell")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.primary)
-                                
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
-                    }
+                    trailingButtons
                 }
             }
             .sheet(isPresented: $showingMapView) {
-                AdvancedMapView(businesses: filteredAndSortedBusinesses, userLocation: locationManager.location)
+                advancedMapView
             }
             .sheet(isPresented: $showFilterSheet) {
-                AdvancedFilterSheet(
-                    minRating: $minRating,
-                    maxDistance: $maxDistance,
-                    priceRange: $priceRange,
-                    isOpenNow: $isOpenNow,
-                    onApply: { applyFilters() }
-                )
+                advancedFilterSheet
+            }
+            .sheet(isPresented: $showSearchSheet) {
+                SearchView(businessViewModel: businessViewModel)
             }
             .sheet(item: $selectedBusiness) { business in
                 BusinessDetailView(business: business)
+                    .onDisappear {
+                        addToRecentlyViewed(business)
+                    }
             }
         }
         .onAppear {
-            if businessViewModel.businesses.isEmpty {
-                businessViewModel.fetchBusinesses()
+            setupView()
+            loadRecentlyViewed()
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.1)) {
+                showWelcomeAnimation = true
             }
-            locationManager.requestPermission()
-            locationManager.startUpdating()
+        }
+    }
+    
+    // MARK: - Background View
+    @ViewBuilder
+    private var backgroundView: some View {
+        ZStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+            
+            AnimatedBackground()
+                .ignoresSafeArea()
         }
     }
     
     // MARK: - Hero Section
+    @ViewBuilder
     private var heroSection: some View {
         VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Explore")
-                        .font(.system(size: 36, weight: .bold))
+                    Text("Discover")
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [.blue, .purple],
+                                colors: [.blue, .purple, .pink],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
+                        .opacity(showWelcomeAnimation ? 1 : 0)
+                        .offset(y: showWelcomeAnimation ? 0 : -20)
                     
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: "location.fill")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.blue, .cyan],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .font(.system(size: 16, weight: .semibold))
+                        
+                        Text(userLocationText)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.secondary)
+                        
+                        Image(systemName: "chevron.down.circle.fill")
+                            .foregroundColor(.secondary)
                             .font(.system(size: 14))
-                        
-                        Text("Toronto, Ontario")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                    }
+                    .onTapGesture {
+                        hapticFeedback(.medium)
                     }
                 }
                 
                 Spacer()
                 
-                // Profile Avatar
+                profileAvatar
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, -60)
+        }
+        .background(Color(.systemBackground))
+    }
+    
+    @ViewBuilder
+    private var profileAvatar: some View {
+        Button(action: {
+            // Navigate to profile - implement navigation logic
+        }) {
+            ZStack {
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 3
+                    )
+                    .frame(width: 56, height: 56)
+                
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [.blue, .purple],
+                            colors: [.blue.opacity(0.3), .purple.opacity(0.3)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 50, height: 50)
-                    .overlay(
-                        Text("IL")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                    )
-                    .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
+                
+                Image(systemName: "person.fill")
+                    .foregroundColor(.white)
+                    .font(.system(size: 20, weight: .semibold))
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
+            .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
         }
     }
     
-    // MARK: - Stats Overview
-    private var statsOverview: some View {
-        HStack(spacing: 12) {
-            HomeStatCard(
-                icon: "building.2.fill",
-                value: "\(businessViewModel.businesses.count)",
-                label: "Places",
-                color: .blue
-            )
-            
-            HomeStatCard(
-                icon: "star.fill",
-                value: String(format: "%.1f", averageRating),
-                label: "Avg Rating",
-                color: .orange
-            )
-            
-            HomeStatCard(
-                icon: "heart.fill",
-                value: "\(favoriteViewModel.favorites.count)",
-                label: "Favorites",
-                color: .red
-            )
-            
-            HomeStatCard(
-                icon: "clock.fill",
-                value: "\(openNowBusinesses.count)",
-                label: "Open Now",
-                color: .green
-            )
-        }
-        .padding(.horizontal)
-    }
-    
-    // MARK: - Quick Actions
+    // MARK: - Quick Actions Section
+    @ViewBuilder
     private var quickActionsSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 QuickActionCard(
                     icon: "sparkles",
                     title: "AI Picks",
                     subtitle: "For You",
                     gradient: [.purple, .pink],
-                    action: { activeFilter = .trending }
+                    action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            activeFilter = .trending
+                            hapticFeedback(.medium)
+                        }
+                    }
                 )
                 
                 QuickActionCard(
                     icon: "crown.fill",
-                    title: "Premium",
-                    subtitle: "Top Rated",
-                    gradient: [.orange, .red],
-                    action: { activeFilter = .topRated }
+                    title: "Top Rated",
+                    subtitle: "Best Quality",
+                    gradient: [.orange, .yellow],
+                    action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            activeFilter = .topRated
+                            hapticFeedback(.medium)
+                        }
+                    }
                 )
                 
                 QuickActionCard(
-                    icon: "location.fill",
+                    icon: "location.fill.viewfinder",
                     title: "Nearby",
-                    subtitle: "Close to you",
+                    subtitle: "Close to You",
                     gradient: [.blue, .cyan],
-                    action: { activeFilter = .nearby }
+                    action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            activeFilter = .nearby
+                            hapticFeedback(.medium)
+                        }
+                    }
                 )
                 
                 QuickActionCard(
-                    icon: "clock.fill",
+                    icon: "clock.badge.checkmark",
                     title: "Open Now",
-                    subtitle: "Visit today",
+                    subtitle: "Visit Today",
                     gradient: [.green, .mint],
-                    action: { activeFilter = .openNow }
+                    action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            activeFilter = .openNow
+                            hapticFeedback(.medium)
+                        }
+                    }
+                )
+                
+                QuickActionCard(
+                    icon: "heart.circle.fill",
+                    title: "Favorites",
+                    subtitle: "Your Picks",
+                    gradient: [.pink, .red],
+                    action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            activeFilter = .favorites
+                            hapticFeedback(.medium)
+                        }
+                    }
                 )
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
+            .padding(.top, 60)
+            .background(
+                Color(.systemBackground)
+                    .shadow(color: .black.opacity(0.05), radius: 10, y: 5)
+            )
         }
     }
-    
-    // MARK: - Quick Filters
-    private var quickFiltersSection: some View {
+    // MARK: - Filter Chips Section
+    @ViewBuilder
+    private var filterChipsSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
-                HomeFilterChip(
-                    title: "All",
-                    icon: "square.grid.2x2",
-                    isSelected: activeFilter == .all,
-                    count: businessViewModel.businesses.count
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        activeFilter = .all
-                        hapticFeedback()
-                    }
+                ForEach(QuickFilter.allCases, id: \.self) { filter in
+                    HomeFilterChip(
+                        title: filter.rawValue,
+                        icon: filter.icon,
+                        isSelected: activeFilter == filter,
+                        count: getFilterCount(filter),
+                        action: {
+                            withAnimation(.spring(response: 0.3)) {
+                                activeFilter = filter
+                                hapticFeedback()
+                            }
+                        }
+                    )
                 }
                 
-                HomeFilterChip(
-                    title: "Trending",
-                    icon: "flame.fill",
-                    isSelected: activeFilter == .trending,
-                    count: trendingBusinesses.count
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        activeFilter = .trending
-                        hapticFeedback()
-                    }
-                }
-                
-                HomeFilterChip(
-                    title: "Open Now",
-                    icon: "clock.fill",
-                    isSelected: activeFilter == .openNow,
-                    count: openNowBusinesses.count
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        activeFilter = .openNow
-                        hapticFeedback()
-                    }
-                }
-                
-                HomeFilterChip(
-                    title: "Top Rated",
-                    icon: "star.fill",
-                    isSelected: activeFilter == .topRated,
-                    count: topRatedBusinesses.count
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        activeFilter = .topRated
-                        hapticFeedback()
-                    }
-                }
-                
-                HomeFilterChip(
-                    title: "Nearby",
-                    icon: "location.fill",
-                    isSelected: activeFilter == .nearby,
-                    count: nearbyBusinesses.count
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        activeFilter = .nearby
-                        hapticFeedback()
-                    }
+                if hasActiveAdvancedFilters {
+                    HomeFilterChip(
+                        title: "Filters",
+                        icon: "slider.horizontal.3",
+                        isSelected: true,
+                        count: activeFiltersCount,
+                        action: {
+                            showFilterSheet = true
+                            hapticFeedback()
+                        }
+                    )
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
         }
     }
     
     // MARK: - Featured Carousel
+    @ViewBuilder
     private var featuredCarousel: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "flame.fill")
-                        .foregroundColor(.orange)
-                        .font(.system(size: 20))
-                    Text("Trending Now")
-                        .font(.title3)
-                        .fontWeight(.bold)
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.orange.opacity(0.2), .red.opacity(0.2)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 40, height: 40)
+                        
+                        Image(systemName: "flame.fill")
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.orange, .red],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .font(.system(size: 20))
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Trending Now")
+                            .font(.system(size: 20, weight: .bold))
+                        Text("Most popular this week")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                
                 Spacer()
-                Button(action: { activeFilter = .trending }) {
-                    Text("View All")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.blue)
+                
+                Button(action: {
+                    activeFilter = .trending
+                    hapticFeedback()
+                }) {
+                    HStack(spacing: 4) {
+                        Text("See All")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 16))
+                    }
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -414,23 +490,155 @@ struct HomeView: View {
                             isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? "")
                         ) {
                             selectedBusiness = business
+                            hapticFeedback(.soft)
                         } onFavorite: {
                             toggleFavorite(business)
                         }
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+    
+    // MARK: - Recommended Section
+    @ViewBuilder
+    private var recommendedSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.purple, .pink],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .font(.system(size: 20))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recommended for You")
+                            .font(.system(size: 20, weight: .bold))
+                        Text("Based on your preferences")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(recommendedBusinesses.prefix(5)) { business in
+                        PremiumBusinessCard(
+                            business: business,
+                            distance: distance(to: business),
+                            isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? "")
+                        ) {
+                            selectedBusiness = business
+                            hapticFeedback(.soft)
+                        } onFavorite: {
+                            toggleFavorite(business)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+    
+    // MARK: - Recently Viewed Section
+    @ViewBuilder
+    private var recentlyViewedSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 20))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recently Viewed")
+                            .font(.system(size: 20, weight: .bold))
+                        Text("Continue where you left off")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation {
+                        recentlyViewed = []
+                        recentlyViewedIds = ""
+                        hapticFeedback(.soft)
+                    }
+                }) {
+                    Text("Clear")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.red)
+                }
+            }
+            .padding(.horizontal, 20)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(recentlyViewed.prefix(5)) { business in
+                        CompactBusinessCard(
+                            business: business,
+                            distance: distance(to: business),
+                            isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
+                            onTap: {
+                                selectedBusiness = business
+                                hapticFeedback(.soft)
+                            },
+                            onFavorite: {
+                                toggleFavorite(business)
+                            }
+                        )
+                        .frame(width: 280)
+                    }
+                }
+                .padding(.horizontal, 20)
             }
         }
     }
     
     // MARK: - Category Section
+    @ViewBuilder
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Categories")
-                .font(.title3)
-                .fontWeight(.bold)
-                .padding(.horizontal)
+            HStack {
+                Text("Categories")
+                    .font(.system(size: 20, weight: .bold))
+                    .padding(.leading, 20)
+                
+                Spacer()
+                
+                if selectedCategory != nil {
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3)) {
+                            selectedCategory = nil
+                            hapticFeedback()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Text("Clear")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    .padding(.trailing, 20)
+                }
+            }
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -458,174 +666,393 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 20)
             }
         }
     }
     
-    // MARK: - Sort & View Mode
-    private var sortAndViewSection: some View {
-        HStack(spacing: 12) {
+    // MARK: - Controls Section
+    @ViewBuilder
+    private var controlsSection: some View {
+        HStack(spacing: 14) {
             Menu {
-                Button(action: { sortBy = .distance }) {
-                    Label("Distance", systemImage: sortBy == .distance ? "checkmark" : "")
-                }
-                Button(action: { sortBy = .rating }) {
-                    Label("Rating", systemImage: sortBy == .rating ? "checkmark" : "")
-                }
-                Button(action: { sortBy = .reviewCount }) {
-                    Label("Most Reviewed", systemImage: sortBy == .reviewCount ? "checkmark" : "")
-                }
-                Button(action: { sortBy = .newest }) {
-                    Label("Newest", systemImage: sortBy == .newest ? "checkmark" : "")
+                ForEach(SortOption.allCases, id: \.self) { option in
+                    Button(action: {
+                        sortBy = option
+                        hapticFeedback()
+                    }) {
+                        Label(
+                            option.rawValue,
+                            systemImage: sortBy == option ? "checkmark.circle.fill" : option.icon
+                        )
+                    }
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 14))
-                    Text(sortByText)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                    Image(systemName: sortBy.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(sortBy.rawValue)
+                        .font(.system(size: 15, weight: .medium))
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundColor(.primary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(Color(.systemGray6))
-                .cornerRadius(20)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(12)
             }
             
             Spacer()
             
             Text("\(filteredAndSortedBusinesses.count) results")
-                .font(.subheadline)
+                .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.secondary)
+            
+            Button(action: cycleViewMode) {
+                Image(systemName: viewMode.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.blue.opacity(0.1)))
+            }
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 20)
     }
     
     // MARK: - Business List Section
+    @ViewBuilder
     private var businessListSection: some View {
-        let _ = print("DEBUG: Rendering business list")
-        return Group {
-            if filteredAndSortedBusinesses.isEmpty {
-                modernEmptyStateView
-            } else {
-                LazyVStack(spacing: 16) {
-                    ForEach(Array(filteredAndSortedBusinesses.enumerated()), id: \.element.id) { index, business in
-                        businessCardForMode(business: business, index: index)
-                    }
-                }
-                .padding(.horizontal)
+        if filteredAndSortedBusinesses.isEmpty {
+            emptyStateView
+        } else {
+            switch viewMode {
+            case .card:
+                cardLayoutView
+            case .list:
+                listLayoutView
+            case .grid:
+                gridLayoutView
             }
         }
     }
     
     @ViewBuilder
-    private func businessCardForMode(business: Business, index: Int) -> some View {
-        switch viewMode {
-        case .list:
-            EnhancedBusinessCardView(
-                business: business,
-                distance: distance(to: business),
-                isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
-                onTap: { selectedBusiness = business },
-                onCall: { callBusiness(business) },
-                onDirections: { openDirections(to: business) },
-                onShare: { shareBusiness(business) },
-                onFavorite: { toggleFavorite(business) }
-            )
-            .transition(.asymmetric(
-                insertion: .scale.combined(with: .opacity),
-                removal: .opacity
-            ))
-            .animation(
-                .spring(response: 0.4, dampingFraction: 0.8)
-                .delay(Double(index) * 0.05),
-                value: filteredAndSortedBusinesses.count
-            )
-            
-        case .grid:
-            // Grid view will be in Part 2
-            CompactBusinessCard(
-                business: business,
-                distance: distance(to: business),
-                isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
-                onTap: { selectedBusiness = business },
-                onFavorite: { toggleFavorite(business) }
-            )
-            
-        case .compact:
-            CompactListCard(
-                business: business,
-                distance: distance(to: business),
-                isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
-                onTap: { selectedBusiness = business },
-                onFavorite: { toggleFavorite(business) }
-            )
+    private var cardLayoutView: some View {
+        LazyVStack(spacing: 20) {
+            ForEach(Array(filteredAndSortedBusinesses.enumerated()), id: \.element.id) { index, business in
+                NavigationLink(destination: BusinessDetailView(business: business)) {
+                    EnhancedBusinessCardView(
+                        business: business,
+                        distance: distance(to: business),
+                        isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
+                        onTap: {
+                            selectedBusiness = business
+                            hapticFeedback(.soft)
+                        },
+                        onCall: { callBusiness(business) },
+                        onDirections: { openDirections(to: business) },
+                        onShare: { shareBusiness(business) },
+                        onFavorite: { toggleFavorite(business) }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.9).combined(with: .opacity),
+                    removal: .opacity
+                ))
+                .animation(
+                    .spring(response: 0.4, dampingFraction: 0.8).delay(Double(index) * 0.03),
+                    value: filteredAndSortedBusinesses.count
+                )
+            }
         }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 100)
     }
     
-    // MARK: - Floating Action Button
-    private var floatingActionButton: some View {
-        Button(action: { showingMapView.toggle() }) {
+    @ViewBuilder
+    private var listLayoutView: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(filteredAndSortedBusinesses) { business in
+                NavigationLink(destination: BusinessDetailView(business: business)) {
+                    CompactListCard(
+                        business: business,
+                        distance: distance(to: business),
+                        isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
+                        onTap: {
+                            selectedBusiness = business
+                            hapticFeedback(.soft)
+                        },
+                        onFavorite: { toggleFavorite(business) }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 100)
+    }
+    
+    @ViewBuilder
+    private var gridLayoutView: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 16),
+                GridItem(.flexible(), spacing: 16)
+            ],
+            spacing: 16
+        ) {
+            ForEach(filteredAndSortedBusinesses) { business in
+                NavigationLink(destination: BusinessDetailView(business: business)) {
+                    CompactBusinessCard(
+                        business: business,
+                        distance: distance(to: business),
+                        isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
+                        onTap: {
+                            selectedBusiness = business
+                            hapticFeedback(.soft)
+                        },
+                        onFavorite: { toggleFavorite(business) }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 100)
+    }
+    
+    // MARK: - Load More Section
+    @ViewBuilder
+    private var loadMoreSection: some View {
+        VStack(spacing: 16) {
+            if businessViewModel.isLoadingMore {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                    Text("Loading more...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+            } else {
+                Button(action: {
+                    businessViewModel.loadMoreBusinesses()
+                    hapticFeedback(.soft)
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Load More")
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(14)
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+    
+    // MARK: - Empty State
+    @ViewBuilder
+    private var emptyStateView: some View {
+        VStack(spacing: 28) {
+            Spacer()
+            
             ZStack {
                 Circle()
                     .fill(
+                        LinearGradient(
+                            colors: [.blue.opacity(0.1), .purple.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 140, height: 140)
+                
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 60, weight: .light))
+                    .foregroundStyle(
                         LinearGradient(
                             colors: [.blue, .purple],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 60, height: 60)
-                    .shadow(color: .blue.opacity(0.4), radius: 12, y: 6)
+            }
+            
+            VStack(spacing: 12) {
+                Text("No Results Found")
+                    .font(.system(size: 24, weight: .bold))
                 
-                Image(systemName: "map.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.white)
+                Text("Try adjusting your filters or\nexplore different categories")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            
+            Button(action: resetFilters) {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                        .font(.system(size: 18))
+                    Text("Reset Filters")
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 14)
+                .background(
+                    LinearGradient(
+                        colors: [.blue, .purple],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(14)
+                .shadow(color: .blue.opacity(0.3), radius: 12, y: 6)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 40)
+    }
+    
+    // MARK: - Scroll Tracker
+    @ViewBuilder
+    private var scrollTracker: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(
+                key: HomeScrollOffsetPreferenceKey.self,
+                value: geometry.frame(in: .named("scroll")).minY
+            )
+        }
+        .onPreferenceChange(HomeScrollOffsetPreferenceKey.self) { value in
+            scrollOffset = value
+            withAnimation(.easeInOut(duration: 0.2)) {
+                headerOpacity = min(max(-value / 100, 0), 1)
             }
         }
     }
     
-    // MARK: - Load More Button
-    private var loadMoreButton: some View {
-        Button(action: { businessViewModel.loadMoreBusinesses() }) {
-            HStack {
-                if businessViewModel.isLoadingMore {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                } else {
-                    Text("Load More")
-                        .fontWeight(.semibold)
-                    Image(systemName: "arrow.down.circle.fill")
+    // MARK: - Compact Header
+    @ViewBuilder
+    private var compactHeader: some View {
+        VStack(spacing: 2) {
+            Text("Discover")
+                .font(.headline)
+                .fontWeight(.bold)
+            if locationManager.location != nil {
+                Text("Toronto, ON")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .opacity(headerOpacity)
+    }
+    
+    // MARK: - Menu Button
+    @ViewBuilder
+    private var menuButton: some View {
+        Menu {
+            Button(action: { showSearchSheet.toggle() }) {
+                Label("Search", systemImage: "magnifyingglass")
+            }
+            Button(action: { showFilterSheet.toggle() }) {
+                Label("Filters", systemImage: "slider.horizontal.3")
+            }
+            Button(action: { showingMapView.toggle() }) {
+                Label("Map View", systemImage: "map")
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 20))
+                .foregroundColor(.primary)
+        }
+    }
+    
+    // MARK: - Trailing Buttons
+    @ViewBuilder
+    private var trailingButtons: some View {
+        HStack(spacing: 16) {
+            Button(action: toggleViewMode) {
+                Image(systemName: viewModeIcon)
+                    .font(.system(size: 18))
+                    .foregroundColor(.primary)
+            }
+            
+            NavigationLink(destination: NotificationView()) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell")
+                        .font(.system(size: 18))
+                        .foregroundColor(.primary)
+                    
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 4, y: -4)
                 }
             }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(
-                LinearGradient(
-                    colors: [.blue, .purple],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .cornerRadius(16)
-            .padding(.horizontal)
         }
-        .disabled(businessViewModel.isLoadingMore)
     }
     
-    // MARK: - Modern Loading View
-    private var modernLoadingView: some View {
+    // MARK: - Floating Action Button
+    @ViewBuilder
+    private var floatingActionButton: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Button(action: {
+                    showingMapView.toggle()
+                    hapticFeedback(.medium)
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.blue, .purple],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 60, height: 60)
+                            .shadow(color: .blue.opacity(0.4), radius: 12, y: 6)
+                        
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white)
+                    }
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+    
+    // MARK: - Loading Overlay
+    @ViewBuilder
+    private var loadingOverlay: some View {
         ZStack {
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
             
             VStack(spacing: 24) {
-                LottieLoadingView()
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(.blue)
                 
                 VStack(spacing: 8) {
                     Text("Discovering Places")
@@ -634,6 +1061,7 @@ struct HomeView: View {
                     Text("Finding the best spots for you...")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
             }
             .padding(40)
@@ -645,67 +1073,39 @@ struct HomeView: View {
         }
     }
     
-    // MARK: - Modern Empty State
-    private var modernEmptyStateView: some View {
-        VStack(spacing: 24) {
-            LottieEmptyStateView()
-            
-            VStack(spacing: 12) {
-                Text("No Results Found")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                Text("Try adjusting your filters or explore different categories")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-            }
-            
-            Button(action: { resetFilters() }) {
-                HStack {
-                    Image(systemName: "arrow.counterclockwise")
-                    Text("Reset Filters")
-                        .fontWeight(.semibold)
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
-                .background(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .cornerRadius(16)
-                .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
-            }
-        }
-        .padding(.top, 60)
-        .padding(.bottom, 40)
+    // MARK: - Advanced Map View
+    @ViewBuilder
+    private var advancedMapView: some View {
+        AdvancedMapView(
+            businesses: filteredAndSortedBusinesses,
+            userLocation: locationManager.location
+        )
+    }
+    
+    // MARK: - Advanced Filter Sheet
+    @ViewBuilder
+    private var advancedFilterSheet: some View {
+        AdvancedFilterSheet(
+            minRating: $minRating,
+            maxDistance: $maxDistance,
+            priceRange: $priceRange,
+            isOpenNow: $isOpenNowFilter,
+            onApply: applyFilters
+        )
     }
 }
-// MARK: - HomeView Extension - Computed Properties & Helper Functions
 
+// MARK: - HomeView Extension - Logic & Computed Properties
 extension HomeView {
+    
     // MARK: - Computed Properties
     
-    private var viewModeIcon: String {
-        switch viewMode {
-        case .list: return "square.grid.2x2"
-        case .grid: return "list.bullet"
-        case .compact: return "square.grid.3x2"
-        }
+    private var userLocationText: String {
+        "Toronto, Ontario"
     }
     
-    private var sortByText: String {
-        switch sortBy {
-        case .distance: return "Distance"
-        case .rating: return "Rating"
-        case .reviewCount: return "Reviews"
-        case .newest: return "Newest"
-        }
+    private var totalBusinessCount: Int {
+        businessViewModel.businesses.count
     }
     
     private var averageRating: Double {
@@ -714,8 +1114,44 @@ extension HomeView {
         return total / Double(businessViewModel.businesses.count)
     }
     
+    private var openNowCount: Int {
+        businessViewModel.businesses.filter { isBusinessOpen($0) }.count
+    }
+    
+    private var nearbyCount: Int {
+        guard let userLocation = locationManager.location else { return 0 }
+        return businessViewModel.businesses.filter { business in
+            let businessLocation = CLLocation(latitude: business.latitude, longitude: business.longitude)
+            return userLocation.distance(from: businessLocation) <= 5000
+        }.count
+    }
+    
     private var availableCategories: [String] {
         Array(Set(businessViewModel.businesses.map { $0.category })).sorted()
+    }
+    
+    private var featuredBusinesses: [Business] {
+        businessViewModel.businesses
+            .filter { $0.rating >= 4.5 && $0.reviewCount >= 10 }
+            .sorted { $0.reviewCount > $1.reviewCount }
+    }
+    
+    private var recommendedBusinesses: [Business] {
+        let favoriteBusinesses = favoriteViewModel.favorites.compactMap { fav in
+            businessViewModel.businesses.first { $0.id == fav.businessId }
+        }
+        
+        let favoriteCategories = Set(favoriteBusinesses.map { $0.category })
+        
+        return businessViewModel.businesses
+            .filter { business in
+                favoriteCategories.contains(business.category) &&
+                business.rating >= 4.0 &&
+                !favoriteViewModel.isFavorite(businessId: business.id ?? "")
+            }
+            .sorted { $0.rating > $1.rating }
+            .prefix(10)
+            .map { $0 }
     }
     
     private var filteredAndSortedBusinesses: [Business] {
@@ -726,49 +1162,64 @@ extension HomeView {
             businesses = businesses.filter { $0.category == category }
         }
         
-        // Advanced filters
+        // Advanced Filters
         if minRating > 0 {
             businesses = businesses.filter { $0.rating >= minRating }
         }
         
-        if isOpenNow {
-            businesses = businesses.filter { isBusinessOpen($0) }
-        }
-        
         if let userLocation = locationManager.location {
-            businesses = businesses.filter {
-                let dist = CLLocation(latitude: $0.latitude, longitude: $0.longitude)
-                    .distance(from: userLocation) / 1000
-                return dist <= maxDistance
+            businesses = businesses.filter { business in
+                let businessLocation = CLLocation(latitude: business.latitude, longitude: business.longitude)
+                let distanceInKm = userLocation.distance(from: businessLocation) / 1000
+                return distanceInKm <= maxDistance
             }
         }
         
-        // Quick filter
+        if isOpenNowFilter {
+            businesses = businesses.filter { isBusinessOpen($0) }
+        }
+        
+        if !hasAmenities.isEmpty {
+            businesses = businesses.filter { business in
+                guard let businessAmenities = business.amenities else { return false }
+                return hasAmenities.isSubset(of: businessAmenities)
+            }
+        }
+        
+        // Quick Filters
         switch activeFilter {
+        case .all:
+            break
         case .openNow:
             businesses = businesses.filter { isBusinessOpen($0) }
         case .topRated:
             businesses = businesses.filter { $0.rating >= 4.5 }
         case .nearby:
             if let userLocation = locationManager.location {
-                businesses = businesses.filter {
-                    CLLocation(latitude: $0.latitude, longitude: $0.longitude)
-                        .distance(from: userLocation) <= 5000
+                businesses = businesses.filter { business in
+                    let businessLocation = CLLocation(latitude: business.latitude, longitude: business.longitude)
+                    return userLocation.distance(from: businessLocation) <= 5000
                 }
             }
         case .trending:
-            businesses = trendingBusinesses
-        default:
-            break
+            businesses = businesses
+                .filter { $0.rating >= 4.0 && $0.reviewCount >= 5 }
+                .sorted { $0.reviewCount > $1.reviewCount }
+        case .favorites:
+            let favoriteIds = favoriteViewModel.favorites.map { $0.businessId }
+            businesses = businesses.filter { business in
+                favoriteIds.contains(business.id ?? "")
+            }
         }
         
         // Sorting
         switch sortBy {
         case .distance:
             if let userLocation = locationManager.location {
-                businesses.sort {
-                    userLocation.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) <
-                    userLocation.distance(from: CLLocation(latitude: $1.latitude, longitude: $1.longitude))
+                businesses.sort { business1, business2 in
+                    let loc1 = CLLocation(latitude: business1.latitude, longitude: business1.longitude)
+                    let loc2 = CLLocation(latitude: business2.latitude, longitude: business2.longitude)
+                    return userLocation.distance(from: loc1) < userLocation.distance(from: loc2)
                 }
             }
         case .rating:
@@ -777,48 +1228,85 @@ extension HomeView {
             businesses.sort { $0.reviewCount > $1.reviewCount }
         case .newest:
             businesses.reverse()
+        case .alphabetical:
+            businesses.sort { $0.name < $1.name }
         }
         
         return businesses
     }
     
-    private var featuredBusinesses: [Business] {
-        businessViewModel.businesses
-            .filter { $0.rating >= 4.5 && $0.reviewCount >= 10 }
-            .sorted { $0.reviewCount > $1.reviewCount }
+    private var hasActiveAdvancedFilters: Bool {
+        minRating > 0 || maxDistance < 50 || !priceRange.isEmpty || isOpenNowFilter || !hasAmenities.isEmpty
     }
     
-    private var trendingBusinesses: [Business] {
-        businessViewModel.businesses
-            .filter { $0.rating >= 4.0 && $0.reviewCount >= 5 }
-            .sorted { $0.reviewCount > $1.reviewCount }
+    private var activeFiltersCount: Int {
+        var count = 0
+        if minRating > 0 { count += 1 }
+        if maxDistance < 50 { count += 1 }
+        if !priceRange.isEmpty { count += 1 }
+        if isOpenNowFilter { count += 1 }
+        if !hasAmenities.isEmpty { count += 1 }
+        return count
     }
     
-    private var openNowBusinesses: [Business] {
-        businessViewModel.businesses.filter { isBusinessOpen($0) }
-    }
-    
-    private var topRatedBusinesses: [Business] {
-        businessViewModel.businesses.filter { $0.rating >= 4.5 }
-    }
-    
-    private var nearbyBusinesses: [Business] {
-        guard let userLocation = locationManager.location else { return [] }
-        return businessViewModel.businesses.filter {
-            CLLocation(latitude: $0.latitude, longitude: $0.longitude)
-                .distance(from: userLocation) <= 5000
-        }
+    private var viewModeIcon: String {
+        viewMode.icon
     }
     
     // MARK: - Helper Functions
     
+    private func setupView() {
+        if businessViewModel.businesses.isEmpty {
+            businessViewModel.fetchBusinesses()
+        }
+        locationManager.requestPermission()
+        locationManager.startUpdating()
+    }
+    
+    @MainActor
+    private func performRefresh() async {
+        isRefreshing = true
+        
+        businessViewModel.refreshBusinesses()
+        favoriteViewModel.fetchUserFavorites()
+        locationManager.startUpdating()
+        
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        
+        isRefreshing = false
+        
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+    }
+    
+    private func loadRecentlyViewed() {
+        let ids = recentlyViewedIds.split(separator: ",").map(String.init)
+        recentlyViewed = ids.compactMap { id in
+            businessViewModel.businesses.first { $0.id == id }
+        }
+    }
+    
+    private func addToRecentlyViewed(_ business: Business) {
+        guard let businessId = business.id else { return }
+        
+        var ids = recentlyViewedIds.split(separator: ",").map(String.init)
+        ids.removeAll { $0 == businessId }
+        ids.insert(businessId, at: 0)
+        ids = Array(ids.prefix(10))
+        
+        recentlyViewedIds = ids.joined(separator: ",")
+        loadRecentlyViewed()
+    }
+    
     private func distance(to business: Business) -> Double? {
         guard let userLocation = locationManager.location else { return nil }
-        return userLocation.distance(from: CLLocation(latitude: business.latitude, longitude: business.longitude))
+        let businessLocation = CLLocation(latitude: business.latitude, longitude: business.longitude)
+        return userLocation.distance(from: businessLocation) / 1000
     }
     
     private func isBusinessOpen(_ business: Business) -> Bool {
         guard let workHours = business.workHours else { return false }
+        
         let weekday = Calendar.current.component(.weekday, from: Date())
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
@@ -844,51 +1332,84 @@ extension HomeView {
             "Restaurant": "fork.knife",
             "Cafe": "cup.and.saucer.fill",
             "Shop": "bag.fill",
+            "Store": "cart.fill",
             "Gym": "figure.run",
             "Salon": "scissors",
             "Hospital": "cross.case.fill",
+            "Doctor": "stethoscope",
             "Hotel": "bed.double.fill",
             "Bar": "wineglass.fill",
             "Spa": "sparkles",
             "Cinema": "film.fill",
             "Park": "leaf.fill",
-            "Museum": "building.columns.fill"
+            "Museum": "building.columns.fill",
+            "Services": "wrench.and.screwdriver",
+            "Lawyer": "briefcase.fill"
         ]
         return icons[category] ?? "star.fill"
+    }
+    
+    private func getFilterCount(_ filter: QuickFilter) -> Int {
+        switch filter {
+        case .all: return businessViewModel.businesses.count
+        case .openNow: return openNowCount
+        case .topRated: return businessViewModel.businesses.filter { $0.rating >= 4.5 }.count
+        case .nearby: return nearbyCount
+        case .trending: return featuredBusinesses.count
+        case .favorites: return favoriteViewModel.favorites.count
+        }
     }
     
     private func toggleViewMode() {
         withAnimation(.spring(response: 0.3)) {
             switch viewMode {
+            case .card: viewMode = .list
             case .list: viewMode = .grid
-            case .grid: viewMode = .compact
-            case .compact: viewMode = .list
+            case .grid: viewMode = .card
             }
             hapticFeedback()
         }
+    }
+    
+    private func cycleViewMode() {
+        toggleViewMode()
     }
     
     private func resetFilters() {
         withAnimation(.spring(response: 0.3)) {
             selectedCategory = nil
             activeFilter = .all
-            sortBy = .distance
             minRating = 0
             maxDistance = 50
-            isOpenNow = false
             priceRange = []
+            isOpenNowFilter = false
+            hasAmenities = []
+            sortBy = .distance
+            hapticFeedback(.medium)
         }
     }
     
     private func applyFilters() {
-        // Filters are applied through binding
         showFilterSheet = false
+        hapticFeedback(.medium)
+    }
+    
+    private func toggleFavorite(_ business: Business) {
+        guard let businessId = business.id else { return }
+        hapticFeedback(.medium)
+        
+        favoriteViewModel.toggleFavorite(businessId: businessId) { success, message in
+            if !success {
+                print("Error: \(message)")
+            }
+        }
     }
     
     private func callBusiness(_ business: Business) {
         if let url = URL(string: "tel://\(business.phone.replacingOccurrences(of: " ", with: ""))") {
             UIApplication.shared.open(url)
         }
+        hapticFeedback(.medium)
     }
     
     private func openDirections(to business: Business) {
@@ -899,29 +1420,28 @@ extension HomeView {
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
+        hapticFeedback(.medium)
     }
     
     private func shareBusiness(_ business: Business) {
-        let text = "Check out \(business.name)! Rated \(String(format: "%.1f", business.rating))⭐️\n\(business.description)"
+        let text = """
+        Check out \(business.name)!
+        
+        ⭐ \(String(format: "%.1f", business.rating)) (\(business.reviewCount) reviews)
+        📍 \(business.address), \(business.city)
+        📞 \(business.phone)
+        
+        Category: \(business.category)
+        """
+        
         let activityVC = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let rootViewController = windowScene.windows.first?.rootViewController {
+            activityVC.popoverPresentationController?.sourceView = rootViewController.view
             rootViewController.present(activityVC, animated: true)
         }
-    }
-    
-    private func toggleFavorite(_ business: Business) {
-        guard let businessId = business.id else { return }
-        
         hapticFeedback(.medium)
-        
-        favoriteViewModel.toggleFavorite(businessId: businessId) { success, message in
-            if !success {
-                // Show error toast
-                print("Error: \(message)")
-            }
-        }
     }
     
     private func hapticFeedback(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
@@ -1960,7 +2480,7 @@ struct CompactListCard: View {
                         Image(systemName: "star.fill").foregroundColor(.orange).font(.caption2)
                         Text(String(format: "%.1f", business.rating)).font(.caption2)
                         if let distance = distance {
-                            Text("•").foregroundColor(.secondary).font(.caption2)
+                            Text("â€¢").foregroundColor(.secondary).font(.caption2)
                             Text(formatDistance(distance)).font(.caption2).foregroundColor(.secondary)
                         }
                     }

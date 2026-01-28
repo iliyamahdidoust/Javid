@@ -480,8 +480,7 @@ class AuthViewModel: ObservableObject {
         }
     }
     
-    // Fetch user profile from Firestore
-    private func fetchUserProfile(uid: String) {
+    @MainActor private func fetchUserProfile(uid: String) {
         db.collection("users").document(uid).getDocument { [weak self] snapshot, error in
             if let error = error {
                 print("Error fetching user profile: \(error)")
@@ -597,3 +596,4 @@ class KeychainHelper {
         SecItemDelete(query as CFDictionary)
     }
 }
+
