@@ -19,12 +19,17 @@ struct Business: Identifiable, Codable {
     var reviewCount: Int = 0
     var workHours: WorkHours?
     
+    // ✅ New fields
+    var amenities: [String]? = nil
+    var socialMedia: SocialMedia? = nil
+    var bookingEnabled: Bool = false
+    
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
     
-    // Updated initializer with photoURLs
-    init(id: String = UUID().uuidString, name: String, category: String, description: String, phone: String, address: String, city: String, country: String, latitude: Double, longitude: Double, ownerId: String, photoURLs: [String] = [], rating: Double = 0.0, reviewCount: Int = 0, workHours: WorkHours? = nil) {
+    // Updated initializer with all fields
+    init(id: String = UUID().uuidString, name: String, category: String, description: String, phone: String, address: String, city: String, country: String, latitude: Double, longitude: Double, ownerId: String, photoURLs: [String] = [], rating: Double = 0.0, reviewCount: Int = 0, workHours: WorkHours? = nil, amenities: [String]? = nil, socialMedia: SocialMedia? = nil, bookingEnabled: Bool = false) {
         self.id = id
         self.name = name
         self.category = category
@@ -40,6 +45,9 @@ struct Business: Identifiable, Codable {
         self.rating = rating
         self.reviewCount = reviewCount
         self.workHours = workHours
+        self.amenities = amenities
+        self.socialMedia = socialMedia
+        self.bookingEnabled = bookingEnabled
     }
 }
 
@@ -72,5 +80,20 @@ struct DayHours: Codable {
         self.isOpen = isOpen
         self.openTime = openTime
         self.closeTime = closeTime
+    }
+}
+
+// ✅ New struct for social media
+struct SocialMedia: Codable {
+    var website: String?
+    var facebook: String?
+    var instagram: String?
+    var youtube: String?
+    
+    init(website: String? = nil, facebook: String? = nil, instagram: String? = nil, youtube: String? = nil) {
+        self.website = website
+        self.facebook = facebook
+        self.instagram = instagram
+        self.youtube = youtube
     }
 }
