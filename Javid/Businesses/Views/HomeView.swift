@@ -262,7 +262,7 @@ struct HomeView: View {
                 
                 Spacer()
                 
-                profileAvatar
+//                profileAvatar
             }
             .padding(.horizontal, 20)
             .padding(.top, -60)
@@ -270,40 +270,40 @@ struct HomeView: View {
         .background(Color(.systemBackground))
     }
     
-    @ViewBuilder
-    private var profileAvatar: some View {
-        Button(action: {
-            // Navigate to profile - implement navigation logic
-        }) {
-            ZStack {
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 3
-                    )
-                    .frame(width: 56, height: 56)
-                
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue.opacity(0.3), .purple.opacity(0.3)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 50, height: 50)
-                
-                Image(systemName: "person.fill")
-                    .foregroundColor(.white)
-                    .font(.system(size: 20, weight: .semibold))
-            }
-            .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
-        }
-    }
+//    @ViewBuilder
+//    private var profileAvatar: some View {
+//        Button(action: {
+//            // Navigate to profile - implement navigation logic
+//        }) {
+//            ZStack {
+//                Circle()
+//                    .strokeBorder(
+//                        LinearGradient(
+//                            colors: [.blue, .purple],
+//                            startPoint: .topLeading,
+//                            endPoint: .bottomTrailing
+//                        ),
+//                        lineWidth: 3
+//                    )
+//                    .frame(width: 56, height: 56)
+//                
+//                Circle()
+//                    .fill(
+//                        LinearGradient(
+//                            colors: [.blue.opacity(0.3), .purple.opacity(0.3)],
+//                            startPoint: .topLeading,
+//                            endPoint: .bottomTrailing
+//                        )
+//                    )
+//                    .frame(width: 50, height: 50)
+//                
+//                Image(systemName: "person.fill")
+//                    .foregroundColor(.white)
+//                    .font(.system(size: 20, weight: .semibold))
+//            }
+//            .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+//        }
+//    }
     
     // MARK: - Quick Actions Section
     @ViewBuilder
