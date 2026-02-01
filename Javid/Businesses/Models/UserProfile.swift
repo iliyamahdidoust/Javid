@@ -13,6 +13,10 @@ struct UserProfile: Identifiable, Codable {
     var createdAt: Date?
     var updatedAt: Date?
     
+    // MARK: - Admin & Claim System
+    var isAdmin: Bool = false              // Admin users can review claims
+    var claimedBusinessIds: [String]?      // Track businesses claimed by this user
+    
     // Computed property for backwards compatibility with displayName
     var displayName: String {
         return name
@@ -29,7 +33,9 @@ struct UserProfile: Identifiable, Codable {
         profileImageURL: String? = nil,
         isBusinessOwner: Bool = false,
         createdAt: Date? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        isAdmin: Bool = false,
+        claimedBusinessIds: [String]? = nil
     ) {
         self.uid = uid
         self.email = email
@@ -40,6 +46,8 @@ struct UserProfile: Identifiable, Codable {
         self.isBusinessOwner = isBusinessOwner
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.isAdmin = isAdmin
+        self.claimedBusinessIds = claimedBusinessIds
     }
     
     // MARK: - Coding Keys
@@ -55,6 +63,8 @@ struct UserProfile: Identifiable, Codable {
         case isBusinessOwner
         case createdAt
         case updatedAt
+        case isAdmin
+        case claimedBusinessIds
     }
     
     // MARK: - Custom Decoding
@@ -70,6 +80,8 @@ struct UserProfile: Identifiable, Codable {
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
         profileImageURL = try container.decodeIfPresent(String.self, forKey: .profileImageURL)
         isBusinessOwner = try container.decode(Bool.self, forKey: .isBusinessOwner)
+        isAdmin = (try? container.decode(Bool.self, forKey: .isAdmin)) ?? false
+        claimedBusinessIds = try container.decodeIfPresent([String].self, forKey: .claimedBusinessIds)
         
         // Handle Firestore Timestamps
         if let timestamp = try? container.decode(Timestamp.self, forKey: .createdAt) {

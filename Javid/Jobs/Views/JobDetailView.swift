@@ -330,7 +330,12 @@ struct JobDetailView: View {
             VStack(spacing: AppSpacing.sm) {
                 // Map
                 Map(coordinateRegion: $region, annotationItems: [job]) { job in
-                    MapMarker(coordinate: job.coordinate, tint: .red)
+                    MapAnnotation(coordinate: job.coordinate) {
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.title)
+                            .foregroundColor(.red)
+                            .shadow(radius: 2)
+                    }
                 }
                 .frame(height: 200)
                 .cornerRadius(AppRadius.md)

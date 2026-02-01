@@ -34,6 +34,10 @@ struct BusinessDetailView: View {
     @State private var region: MKCoordinateRegion
     @State private var isRefreshing = false
     
+    // MARK: - Claim System States
+    @State private var showingClaimSheet = false
+    @State private var showingClaimStatusSheet = false
+    
     // Analytics (Only visible to owner)
     @State private var viewCount: Int = 0
     @State private var saveCount: Int = 0
@@ -176,6 +180,13 @@ struct BusinessDetailView: View {
          .sheet(isPresented: $showingSocialMediaEditor) {
              SocialMediaEditorView(business: business, businessViewModel: businessViewModel)
          }
+        // MARK: - 🆕 CLAIM SYSTEM SHEETS
+        .sheet(isPresented: $showingClaimSheet) {
+            ClaimBusinessView(authViewModel: authViewModel, business: business)
+        }
+        .sheet(isPresented: $showingClaimStatusSheet) {
+            ClaimStatusView()
+        }
         .alert("Delete Business", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { deleteBusiness() }
@@ -450,11 +461,21 @@ struct BusinessDetailView: View {
                     .padding(.vertical, 12)
             }
             
+            // MARK: - 🆕 CLAIM BUTTON SECTION (For Non-Owners)
+            if !isOwner {
+                claimButtonSection
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                
+                Divider()
+                    .padding(.vertical, 12)
+            }
+            
             // About
             if !business.description.isEmpty {
                 aboutSection
                     .padding(.horizontal, 20)
-                    .padding(.top, isOwner ? 0 : 16)
+                    .padding(.top, isOwner ? 0 : 0)
                 
                 Divider()
                     .padding(.vertical, 12)
@@ -598,6 +619,137 @@ struct BusinessDetailView: View {
                     value: "\(reviewViewModel.reviews.count)",
                     label: "Reviews",
                     color: .green
+                )
+            }
+        }
+    }
+    
+    // MARK: - 🆕 CLAIM BUTTON SECTION
+    private var claimButtonSection: some View {
+        VStack(spacing: 12) {
+            // If business is claimable and unclaimed
+            if business.isUnclaimed {
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.title2)
+                            .foregroundColor(.orange)
+                            .frame(width: 50, height: 50)
+                            .background(
+                                Circle()
+                                    .fill(Color.orange.opacity(0.15))
+                            )
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Own this business?")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            Text("Claim it to manage your listing and reach more customers")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    Button(action: { showingClaimSheet = true }) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Claim This Business")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.orange, Color.orange.opacity(0.8)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(16)
+                .background(Color.orange.opacity(0.05))
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+            }
+            
+            // If business has pending claim
+            else if business.hasPendingClaim {
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.fill")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                            .frame(width: 50, height: 50)
+                            .background(
+                                Circle()
+                                    .fill(Color.blue.opacity(0.15))
+                            )
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Claim Under Review")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            Text("Your claim is being reviewed by our team")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    Button(action: { showingClaimStatusSheet = true }) {
+                        HStack {
+                            Image(systemName: "doc.text.magnifyingglass")
+                            Text("Check Status")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(16)
+                .background(Color.blue.opacity(0.05))
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                )
+            }
+            
+            // If business is already claimed (by another user)
+            else if business.isClaimed {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title3)
+                        .foregroundColor(.green)
+                    
+                    Text("This business has been claimed")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                }
+                .padding(16)
+                .background(Color.green.opacity(0.05))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.green.opacity(0.2), lineWidth: 1)
                 )
             }
         }
@@ -1981,4 +2133,3 @@ struct SocialMediaEditorView: View {
         }
     }
 }
-

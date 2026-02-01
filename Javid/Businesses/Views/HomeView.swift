@@ -1,6 +1,8 @@
 import SwiftUI
 import CoreLocation
 import MapKit
+import Combine
+
 
 struct HomeView: View {
     // MARK: - Dependencies
@@ -21,6 +23,8 @@ struct HomeView: View {
     @State private var selectedBusiness: Business?
     @State private var isRefreshing = false
     @State private var showWelcomeAnimation = false
+    @State private var showLocationPicker = false // NEW: For location selection
+    @State private var hasUnreadNotifications = false // NEW: For notification badge
     
     // MARK: - Advanced Filters
     @State private var minRating: Double = 0
@@ -29,9 +33,6 @@ struct HomeView: View {
     @State private var isOpenNowFilter: Bool = false
     @State private var hasAmenities: Set<String> = []
     
-    // MARK: - Recently Viewed & Personalization
-    @State private var recentlyViewed: [Business] = []
-    @AppStorage("recentlyViewedIds") private var recentlyViewedIds: String = ""
     @AppStorage("searchHistory") private var searchHistoryString: String = ""
     
     // MARK: - Enums
@@ -131,11 +132,6 @@ struct HomeView: View {
                                 recommendedSection
                             }
                             
-                            // Recently Viewed
-                            if !recentlyViewed.isEmpty && activeFilter == .all {
-                                recentlyViewedSection
-                            }
-                            
                             // Category Grid
                             categorySection
                             
@@ -192,17 +188,17 @@ struct HomeView: View {
             }
             .sheet(item: $selectedBusiness) { business in
                 BusinessDetailView(business: business)
-                    .onDisappear {
-                        addToRecentlyViewed(business)
-                    }
+            }
+            .sheet(isPresented: $showLocationPicker) {
+                LocationPickerView(locationManager: locationManager)
             }
         }
         .onAppear {
             setupView()
-            loadRecentlyViewed()
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.1)) {
                 showWelcomeAnimation = true
             }
+            checkForNotifications() // Check notification status
         }
     }
     
@@ -256,6 +252,7 @@ struct HomeView: View {
                             .font(.system(size: 14))
                     }
                     .onTapGesture {
+                        showLocationPicker = true
                         hapticFeedback(.medium)
                     }
                 }
@@ -286,7 +283,7 @@ struct HomeView: View {
 //                        lineWidth: 3
 //                    )
 //                    .frame(width: 56, height: 56)
-//                
+//
 //                Circle()
 //                    .fill(
 //                        LinearGradient(
@@ -296,7 +293,7 @@ struct HomeView: View {
 //                        )
 //                    )
 //                    .frame(width: 50, height: 50)
-//                
+//
 //                Image(systemName: "person.fill")
 //                    .foregroundColor(.white)
 //                    .font(.system(size: 20, weight: .semibold))
@@ -550,65 +547,6 @@ struct HomeView: View {
         }
     }
     
-    // MARK: - Recently Viewed Section
-    @ViewBuilder
-    private var recentlyViewedSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                HStack(spacing: 10) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .foregroundColor(.blue)
-                        .font(.system(size: 20))
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Recently Viewed")
-                            .font(.system(size: 20, weight: .bold))
-                        Text("Continue where you left off")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    withAnimation {
-                        recentlyViewed = []
-                        recentlyViewedIds = ""
-                        hapticFeedback(.soft)
-                    }
-                }) {
-                    Text("Clear")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.red)
-                }
-            }
-            .padding(.horizontal, 20)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(recentlyViewed.prefix(5)) { business in
-                        CompactBusinessCard(
-                            business: business,
-                            distance: distance(to: business),
-                            isFavorite: favoriteViewModel.isFavorite(businessId: business.id ?? ""),
-                            onTap: {
-                                selectedBusiness = business
-                                hapticFeedback(.soft)
-                            },
-                            onFavorite: {
-                                toggleFavorite(business)
-                            }
-                        )
-                        .frame(width: 280)
-                    }
-                }
-                .padding(.horizontal, 20)
-            }
-        }
-    }
-    
     // MARK: - Category Section
     @ViewBuilder
     private var categorySection: some View {
@@ -828,37 +766,21 @@ struct HomeView: View {
     private var loadMoreSection: some View {
         VStack(spacing: 16) {
             if businessViewModel.isLoadingMore {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                    Text("Loading more...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-            } else {
+                ProgressView()
+                    .scaleEffect(1.0)
+                    .tint(.blue)
+                    .padding()
+            } else if filteredAndSortedBusinesses.count >= 20 {
                 Button(action: {
                     businessViewModel.loadMoreBusinesses()
                     hapticFeedback(.soft)
                 }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "arrow.down.circle.fill")
-                        Text("Load More")
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(14)
+                    Text("Load More")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                        .padding(.vertical, 12)
                 }
-                .padding(.horizontal, 20)
             }
         }
         .padding(.vertical, 10)
@@ -954,11 +876,9 @@ struct HomeView: View {
             Text("Discover")
                 .font(.headline)
                 .fontWeight(.bold)
-            if locationManager.location != nil {
-                Text("Toronto, ON")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
+            Text(userLocationText)
+                .font(.caption2)
+                .foregroundColor(.secondary)
         }
         .opacity(headerOpacity)
     }
@@ -993,16 +913,19 @@ struct HomeView: View {
                     .foregroundColor(.primary)
             }
             
-            NavigationLink(destination: NotificationView()) {
+            NavigationLink(destination: NotificationView(hasUnreadNotifications: $hasUnreadNotifications)) {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "bell")
                         .font(.system(size: 18))
                         .foregroundColor(.primary)
                     
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                        .offset(x: 4, y: -4)
+                    // Only show badge if there are unread notifications
+                    if hasUnreadNotifications {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                            .offset(x: 4, y: -4)
+                    }
                 }
             }
         }
@@ -1100,8 +1023,15 @@ extension HomeView {
     
     // MARK: - Computed Properties
     
+    // FIX 1: Real user location instead of placeholder
     private var userLocationText: String {
-        "Toronto, Ontario"
+        if let location = locationManager.location {
+            return locationManager.cityName ?? "Getting location..."
+        } else if locationManager.authorizationStatus == .denied || locationManager.authorizationStatus == .restricted {
+            return "Location Access Denied"
+        } else {
+            return "Getting location..."
+        }
     }
     
     private var totalBusinessCount: Int {
@@ -1263,6 +1193,19 @@ extension HomeView {
         locationManager.startUpdating()
     }
     
+    // FIX 3: Check for unread notifications
+    private func checkForNotifications() {
+        // TODO: Replace this with your actual notification checking logic
+        // This could be a call to your backend API or a local notification manager
+        // For example:
+        // NotificationManager.shared.hasUnreadNotifications { hasUnread in
+        //     hasUnreadNotifications = hasUnread
+        // }
+        
+        // Placeholder implementation - replace with your actual logic
+        hasUnreadNotifications = false // Set to false by default
+    }
+    
     @MainActor
     private func performRefresh() async {
         isRefreshing = true
@@ -1270,6 +1213,7 @@ extension HomeView {
         businessViewModel.refreshBusinesses()
         favoriteViewModel.fetchUserFavorites()
         locationManager.startUpdating()
+        checkForNotifications() // Refresh notification status
         
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         
@@ -1277,25 +1221,6 @@ extension HomeView {
         
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
-    }
-    
-    private func loadRecentlyViewed() {
-        let ids = recentlyViewedIds.split(separator: ",").map(String.init)
-        recentlyViewed = ids.compactMap { id in
-            businessViewModel.businesses.first { $0.id == id }
-        }
-    }
-    
-    private func addToRecentlyViewed(_ business: Business) {
-        guard let businessId = business.id else { return }
-        
-        var ids = recentlyViewedIds.split(separator: ",").map(String.init)
-        ids.removeAll { $0 == businessId }
-        ids.insert(businessId, at: 0)
-        ids = Array(ids.prefix(10))
-        
-        recentlyViewedIds = ids.joined(separator: ",")
-        loadRecentlyViewed()
     }
     
     private func distance(to business: Business) -> Double? {
@@ -1877,7 +1802,7 @@ struct AdvancedFilterSheet: View {
                 
                 Section(header: Text("Price Range")) {
                     HStack(spacing: 12) {
-                        ForEach(["$", "$", "$$", "$$"], id: \.self) { price in
+                        ForEach(["$", "$$", "$$$", "$$$$"], id: \.self) { price in
                             Button(action: {
                                 if priceRange.contains(price) {
                                     priceRange.remove(price)
@@ -2169,8 +2094,901 @@ struct BusinessMapPreview: View {
     }
 }
 
-// MARK: - Notification View (Placeholder)
+
+
+
+import SwiftUI
+import MapKit
+import Combine
+
+// MARK: - Main Location Picker (First Screen - Popup)
+struct LocationPickerView: View {
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var locationManager: LocationManager
+    @StateObject private var viewModel = LocationPickerViewModel()
+    @State private var showAdvancedSearch = false
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.primary)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("Choose a location")
+                        .font(.system(size: 17, weight: .semibold))
+                    
+                    Spacer()
+                    
+                    // Invisible spacer for centering
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .opacity(0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                
+                Divider()
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Current Location Card
+                        currentLocationCard
+                        
+                        // Search Button
+                        searchButton
+                        
+                        // Recent Locations
+                        if !viewModel.recentLocations.isEmpty {
+                            recentLocationsSection
+                        }
+                        
+                        // Suggested Locations
+                        suggestedLocationsSection
+                    }
+                    .padding(.vertical, 24)
+                }
+            }
+            .background(Color(.systemBackground))
+        }
+        .fullScreenCover(isPresented: $showAdvancedSearch) {
+            AdvancedLocationSearchView(
+                locationManager: locationManager,
+                viewModel: viewModel
+            )
+        }
+        .onAppear {
+            viewModel.locationManager = locationManager
+            viewModel.loadRecentLocations()
+        }
+    }
+    
+    // MARK: - Current Location Card
+    @ViewBuilder
+    private var currentLocationCard: some View {
+        Button(action: {
+            locationManager.requestPermission()
+            locationManager.startUpdating()
+            // Set to normal radius (50km)
+            locationManager.searchRadius = 50
+            dismiss()
+        }) {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(width: 48, height: 48)
+                    
+                    Image(systemName: "location.fill")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 20))
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Locate me")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Text("Use my current location")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray6))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal, 20)
+    }
+    
+    // MARK: - Search Button
+    @ViewBuilder
+    private var searchButton: some View {
+        Button(action: { showAdvancedSearch = true }) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 16))
+                
+                Text("Search by city, neighborhood or ZIP code")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.systemGray6))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal, 20)
+    }
+    
+    // MARK: - Recent Locations Section
+    @ViewBuilder
+    private var recentLocationsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent locations")
+                    .font(.system(size: 20, weight: .bold))
+                
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            
+            VStack(spacing: 0) {
+                ForEach(Array(viewModel.recentLocations.prefix(5).enumerated()), id: \.element.id) { index, location in
+                    LocationRow(
+                        icon: "clock",
+                        title: location.name,
+                        showDivider: index < min(4, viewModel.recentLocations.count - 1)
+                    ) {
+                        viewModel.selectLocation(location)
+                        dismiss()
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+        }
+    }
+    
+    // MARK: - Suggested Locations Section
+    @ViewBuilder
+    private var suggestedLocationsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Suggested for you")
+                .font(.system(size: 20, weight: .bold))
+                .padding(.horizontal, 20)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(viewModel.suggestedLocations, id: \.id) { location in
+                        SuggestedLocationChip(location: location) {
+                            viewModel.selectLocation(location)
+                            dismiss()
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+}
+
+// MARK: - Advanced Location Search View (Second Screen - Full Screen)
+struct AdvancedLocationSearchView: View {
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var locationManager: LocationManager
+    @ObservedObject var viewModel: LocationPickerViewModel
+    
+    @StateObject private var searchViewModel = LocationSearchViewModel()
+    @StateObject private var mapViewModel = InteractiveMapViewModel()
+    
+    @State private var selectedRadius: Double = 50
+    @State private var displayRadius: Double = 50 // For display only
+    @State private var useCustomRadius = false
+    @State private var isSearchFocused = false
+    
+    let normalRadius: Double = 50.0 // Normal radius in kilometers
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                VStack(spacing: 0) {
+                    // Search Bar
+                    searchBar
+                    
+                    if !isSearchFocused && searchViewModel.searchText.isEmpty {
+                        // Interactive Map and Radius Selection
+                        VStack(spacing: 0) {
+                            interactiveMap
+                            
+                            ScrollView {
+                                radiusSelection
+                                    .padding(.bottom, 100) // Space for apply button
+                            }
+                        }
+                        .overlay(alignment: .bottom) {
+                            // Apply Button (floating)
+                            applyButton
+                                .background(Color(.systemBackground))
+                        }
+                    } else {
+                        // Search Results
+                        searchResults
+                    }
+                }
+                .navigationBarHidden(true)
+            }
+        }
+        .onAppear {
+            searchViewModel.locationManager = locationManager
+            if let location = locationManager.location {
+                mapViewModel.centerCoordinate = location.coordinate
+            }
+            displayRadius = selectedRadius
+        }
+    }
+    
+    // MARK: - Search Bar
+    @ViewBuilder
+    private var searchBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button(action: {
+                    if isSearchFocused || !searchViewModel.searchText.isEmpty {
+                        searchViewModel.searchText = ""
+                        searchViewModel.clearResults()
+                        isSearchFocused = false
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    } else {
+                        dismiss()
+                    }
+                }) {
+                    Image(systemName: isSearchFocused || !searchViewModel.searchText.isEmpty ? "arrow.left" : "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 16))
+                    
+                    TextField("Search by city, neighborhood or ZIP code", text: $searchViewModel.searchText, onEditingChanged: { editing in
+                        isSearchFocused = editing
+                    })
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .autocapitalization(.none)
+                    
+                    if !searchViewModel.searchText.isEmpty {
+                        Button(action: {
+                            searchViewModel.searchText = ""
+                            searchViewModel.clearResults()
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            Divider()
+        }
+    }
+    
+    // MARK: - Interactive Map
+    @ViewBuilder
+    private var interactiveMap: some View {
+        ZStack {
+            // Map View with gesture support
+            InteractiveMapView(
+                viewModel: mapViewModel,
+                radius: useCustomRadius ? displayRadius : normalRadius
+            )
+            .frame(height: 400)
+            
+            // Center Pin with Circle (fixed in middle)
+            VStack {
+                Spacer()
+                
+                ZStack {
+                    // Radius circle attached to pointer
+                    Circle()
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 2)
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(
+                            width: calculateCircleSize(),
+                            height: calculateCircleSize()
+                        )
+                    
+                    // Center dot
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 20, height: 20)
+                        Circle()
+                            .stroke(Color.white, lineWidth: 3)
+                            .frame(width: 20, height: 20)
+                    }
+                    .shadow(color: .black.opacity(0.3), radius: 4)
+                }
+                
+                Spacer()
+            }
+            .allowsHitTesting(false)
+        }
+    }
+    
+    // Calculate circle size based on map zoom level
+    private func calculateCircleSize() -> CGFloat {
+        let radius = useCustomRadius ? displayRadius : normalRadius
+        // Map radius (km) to screen size - adjust multiplier as needed
+        let baseSize: CGFloat = 200.0
+        let scale = radius / 50.0 // 50km is our baseline
+        return baseSize * CGFloat(scale)
+    }
+    
+    // MARK: - Radius Selection
+    @ViewBuilder
+    private var radiusSelection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Suggested radius option
+            RadioButton(
+                isSelected: !useCustomRadius,
+                title: "Suggested local radius",
+                subtitle: "Show me listings from this general area."
+            ) {
+                useCustomRadius = false
+            }
+            
+            // Custom radius option
+            RadioButton(
+                isSelected: useCustomRadius,
+                title: "Custom local radius",
+                subtitle: "Only show me listings within a specific distance."
+            ) {
+                useCustomRadius = true
+            }
+            
+            if useCustomRadius {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Slider with labels
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("1 km")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Text("100 km")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Slider(value: $selectedRadius, in: 1...100, step: 1) { editing in
+                            if !editing {
+                                // Update display radius when user finishes dragging
+                                displayRadius = selectedRadius
+                            }
+                        }
+                        .tint(.blue)
+                        .onChange(of: selectedRadius) { newValue in
+                            // Throttled update - only update every 5km to reduce lag
+                            if abs(newValue - displayRadius) >= 5 || newValue == 1 || newValue == 100 {
+                                displayRadius = newValue
+                            }
+                        }
+                    }
+                    
+                    // Current radius display
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Kilometers")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("\(Int(selectedRadius))")
+                            .font(.system(size: 28, weight: .regular))
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(.systemGray4), lineWidth: 1)
+                    )
+                }
+            }
+        }
+        .padding(20)
+        .background(Color(.systemBackground))
+    }
+    
+    // MARK: - Search Results
+    @ViewBuilder
+    private var searchResults: some View {
+        if searchViewModel.isSearching {
+            VStack(spacing: 16) {
+                ProgressView()
+                Text("Searching...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxHeight: .infinity)
+        } else if searchViewModel.searchResults.isEmpty && !searchViewModel.searchText.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 50))
+                    .foregroundColor(.gray.opacity(0.5))
+                Text("No results found")
+                    .font(.headline)
+            }
+            .frame(maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(searchViewModel.searchResults, id: \.self) { completion in
+                        Button(action: {
+                            searchViewModel.selectLocation(completion) { success, coordinate in
+                                if success, let coord = coordinate {
+                                    mapViewModel.centerCoordinate = coord
+                                    searchViewModel.searchText = ""
+                                    searchViewModel.clearResults()
+                                    isSearchFocused = false
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "mappin.circle")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.gray)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(completion.title)
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.primary)
+                                    
+                                    if !completion.subtitle.isEmpty {
+                                        Text(completion.subtitle)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(16)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        if completion != searchViewModel.searchResults.last {
+                            Divider()
+                                .padding(.leading, 52)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Apply Button
+    @ViewBuilder
+    private var applyButton: some View {
+        Button(action: {
+            // Update location with selected coordinate and radius
+            let coordinate = mapViewModel.centerCoordinate
+            locationManager.updateLocation(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                cityName: "" 
+            )
+            locationManager.searchRadius = useCustomRadius ? selectedRadius : normalRadius
+            
+            // Dismiss both sheets
+            dismiss()
+        }) {
+            Text("Apply")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(16)
+                .background(Color.blue)
+                .cornerRadius(8)
+        }
+        .padding(20)
+    }
+}
+
+// MARK: - Interactive Map View
+struct InteractiveMapView: UIViewRepresentable {
+    @ObservedObject var viewModel: InteractiveMapViewModel
+    let radius: Double
+    
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        mapView.isRotateEnabled = false
+        mapView.isPitchEnabled = false
+        mapView.showsUserLocation = false
+        
+        // Add gesture recognizers
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        panGesture.delegate = context.coordinator
+        mapView.addGestureRecognizer(panGesture)
+        
+        return mapView
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        // Update region based on center coordinate and radius
+        let region = MKCoordinateRegion(
+            center: viewModel.centerCoordinate,
+            latitudinalMeters: radius * 2000,
+            longitudinalMeters: radius * 2000
+        )
+        
+        mapView.setRegion(region, animated: false) // Changed to false for smoother performance
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        var parent: InteractiveMapView
+        
+        init(_ parent: InteractiveMapView) {
+            self.parent = parent
+        }
+        
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let mapView = gesture.view as? MKMapView else { return }
+            
+            if gesture.state == .changed {
+                let translation = gesture.translation(in: mapView)
+                
+                // Convert pixel translation to coordinate translation
+                let pointsPerDegree = mapView.frame.width / mapView.region.span.longitudeDelta
+                let latitudeDelta = -Double(translation.y) / pointsPerDegree
+                let longitudeDelta = -Double(translation.x) / pointsPerDegree
+                
+                parent.viewModel.centerCoordinate = CLLocationCoordinate2D(
+                    latitude: parent.viewModel.centerCoordinate.latitude + latitudeDelta,
+                    longitude: parent.viewModel.centerCoordinate.longitude + longitudeDelta
+                )
+                
+                gesture.setTranslation(.zero, in: mapView)
+            }
+        }
+        
+        // Allow simultaneous gestures for pinch zoom
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
+        }
+    }
+}
+
+// MARK: - Interactive Map View Model
+class InteractiveMapViewModel: ObservableObject {
+    @Published var centerCoordinate: CLLocationCoordinate2D = CLLocationCoordinate2D(latitude: 43.6532, longitude: -79.3832)
+}
+
+// MARK: - Supporting Views
+
+struct LocationRow: View {
+    let icon: String
+    let title: String
+    let showDivider: Bool
+    let onSelect: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: onSelect) {
+                HStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.system(size: 20))
+                        .foregroundColor(.gray)
+                        .frame(width: 24)
+                    
+                    Text(title)
+                        .font(.system(size: 17))
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            if showDivider {
+                Divider()
+                    .padding(.leading, 56)
+            }
+        }
+    }
+}
+
+struct SuggestedLocationChip: View {
+    let location: SavedLocation
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Image(systemName: "mappin.circle")
+                    .font(.system(size: 16))
+                
+                Text(location.name)
+                    .font(.system(size: 15, weight: .medium))
+            }
+            .foregroundColor(.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(.systemGray6))
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct RadioButton: View {
+    let isSelected: Bool
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .stroke(isSelected ? Color.blue : Color(.systemGray4), lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                    
+                    if isSelected {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 12, height: 12)
+                    }
+                }
+                .padding(.top, 2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Text(subtitle)
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Models
+
+struct SavedLocation: Identifiable, Codable {
+    let id: String
+    let name: String
+    let latitude: Double
+    let longitude: Double
+    
+    init(id: String = UUID().uuidString, name: String, latitude: Double, longitude: Double) {
+        self.id = id
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
+// MARK: - View Models
+
+class LocationPickerViewModel: ObservableObject {
+    @Published var recentLocations: [SavedLocation] = []
+    @Published var suggestedLocations: [SavedLocation] = [
+        SavedLocation(name: "Toronto, Ontario", latitude: 43.6532, longitude: -79.3832),
+        SavedLocation(name: "Hamilton, Ontario", latitude: 43.2557, longitude: -79.8711),
+        SavedLocation(name: "Mississauga, Ontario", latitude: 43.5890, longitude: -79.6441),
+        SavedLocation(name: "Brampton, Ontario", latitude: 43.7315, longitude: -79.7624),
+        SavedLocation(name: "Markham, Ontario", latitude: 43.8561, longitude: -79.3370)
+    ]
+    
+    var locationManager: LocationManager?
+    
+    private let recentLocationsKey = "recentLocations"
+    
+    func loadRecentLocations() {
+        if let data = UserDefaults.standard.data(forKey: recentLocationsKey),
+           let locations = try? JSONDecoder().decode([SavedLocation].self, from: data) {
+            recentLocations = locations
+        }
+    }
+    
+    func selectLocation(_ location: SavedLocation) {
+        locationManager?.updateLocation(
+            latitude: location.latitude,
+            longitude: location.longitude,
+            cityName: location.name
+        )
+        locationManager?.searchRadius = 50 // Set to normal radius
+        
+        // Add to recent locations
+        if !recentLocations.contains(where: { $0.id == location.id }) {
+            recentLocations.insert(location, at: 0)
+            if recentLocations.count > 10 {
+                recentLocations.removeLast()
+            }
+            saveRecentLocations()
+        }
+    }
+    
+    private func saveRecentLocations() {
+        if let data = try? JSONEncoder().encode(recentLocations) {
+            UserDefaults.standard.set(data, forKey: recentLocationsKey)
+        }
+    }
+}
+
+class LocationSearchViewModel: NSObject, ObservableObject {
+    @Published var searchText: String = ""
+    @Published var searchResults: [MKLocalSearchCompletion] = []
+    @Published var isSearching: Bool = false
+    
+    var locationManager: LocationManager?
+    
+    private var searchCompleter = MKLocalSearchCompleter()
+    private var cancellables = Set<AnyCancellable>()
+    
+    override init() {
+        super.init()
+        searchCompleter.delegate = self
+        searchCompleter.resultTypes = [.address, .query]
+        
+        $searchText
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] searchText in
+                self?.performSearch(query: searchText)
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func performSearch(query: String) {
+        guard !query.isEmpty else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+        
+        isSearching = true
+        searchCompleter.queryFragment = query
+    }
+    
+    func clearResults() {
+        searchResults = []
+        isSearching = false
+    }
+    
+    func selectLocation(_ completion: MKLocalSearchCompletion, completionHandler: @escaping (Bool, CLLocationCoordinate2D?) -> Void) {
+        let searchRequest = MKLocalSearch.Request(completion: completion)
+        let search = MKLocalSearch(request: searchRequest)
+        
+        search.start { [weak self] response, error in
+            guard let self = self,
+                  let response = response,
+                  let item = response.mapItems.first,
+                  let location = item.placemark.location else {
+                completionHandler(false, nil)
+                return
+            }
+            
+            let cityName = self.formatCityName(from: item.placemark)
+            
+            DispatchQueue.main.async {
+                self.locationManager?.updateLocation(
+                    latitude: location.coordinate.latitude,
+                    longitude: location.coordinate.longitude,
+                    cityName: cityName
+                )
+                completionHandler(true, location.coordinate)
+            }
+        }
+    }
+    
+    private func formatCityName(from placemark: MKPlacemark) -> String {
+        var components: [String] = []
+        
+        if let city = placemark.locality {
+            components.append(city)
+        }
+        if let state = placemark.administrativeArea {
+            components.append(state)
+        }
+        
+        return components.isEmpty ? "Selected Location" : components.joined(separator: ", ")
+    }
+}
+
+extension LocationSearchViewModel: MKLocalSearchCompleterDelegate {
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        DispatchQueue.main.async {
+            self.searchResults = completer.results
+            self.isSearching = false
+        }
+    }
+    
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.isSearching = false
+        }
+    }
+}
+
+// MARK: - Helper Struct for Map Annotations
+struct IdentifiableCoordinate: Identifiable {
+    let id = UUID()
+    let coordinate: CLLocationCoordinate2D
+}
+
+// MARK: - LocationManager Extension (Add this property)
+extension LocationManager {
+    private static var radiusKey = "searchRadius"
+    
+    var searchRadius: Double {
+        get {
+            return UserDefaults.standard.double(forKey: LocationManager.radiusKey) != 0
+                ? UserDefaults.standard.double(forKey: LocationManager.radiusKey)
+                : 50.0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: LocationManager.radiusKey)
+        }
+    }
+}
+
+// MARK: - Updated Notification View
 struct NotificationView: View {
+    @Binding var hasUnreadNotifications: Bool
+    
     var body: some View {
         VStack {
             Text("Notifications")
@@ -2192,33 +3010,38 @@ struct NotificationView: View {
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Mark notifications as read when view appears
+            hasUnreadNotifications = false
+        }
     }
 }
-    private func formatDistance(_ distance: Double) -> String {
-        return distance < 1000 ? String(format: "%.0f m", distance) : String(format: "%.1f km", distance / 1000)
+
+private func formatDistance(_ distance: Double) -> String {
+    return distance < 1000 ? String(format: "%.0f m", distance) : String(format: "%.1f km", distance / 1000)
+}
+
+
+private func isBusinessOpen(_ business: Business, _ workHours: WorkHours) -> Bool {
+    let weekday = Calendar.current.component(.weekday, from: Date())
+    let timeFormatter = DateFormatter()
+    timeFormatter.dateFormat = "HH:mm"
+    let currentTime = timeFormatter.string(from: Date())
+    
+    let dayHours: DayHours
+    switch weekday {
+    case 1: dayHours = workHours.sunday
+    case 2: dayHours = workHours.monday
+    case 3: dayHours = workHours.tuesday
+    case 4: dayHours = workHours.wednesday
+    case 5: dayHours = workHours.thursday
+    case 6: dayHours = workHours.friday
+    case 7: dayHours = workHours.saturday
+    default: return false
     }
     
-    
-    private func isBusinessOpen(_ business: Business, _ workHours: WorkHours) -> Bool {
-        let weekday = Calendar.current.component(.weekday, from: Date())
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:mm"
-        let currentTime = timeFormatter.string(from: Date())
-        
-        let dayHours: DayHours
-        switch weekday {
-        case 1: dayHours = workHours.sunday
-        case 2: dayHours = workHours.monday
-        case 3: dayHours = workHours.tuesday
-        case 4: dayHours = workHours.wednesday
-        case 5: dayHours = workHours.thursday
-        case 6: dayHours = workHours.friday
-        case 7: dayHours = workHours.saturday
-        default: return false
-        }
-        
-        return dayHours.isOpen && currentTime >= dayHours.openTime && currentTime <= dayHours.closeTime
-    }
+    return dayHours.isOpen && currentTime >= dayHours.openTime && currentTime <= dayHours.closeTime
+}
 
 
 struct EnhancedBusinessCardView: View {
@@ -2310,7 +3133,7 @@ struct EnhancedBusinessCardView: View {
                             
                             if let workHours = business.workHours, isBusinessOpen(business, workHours) {
                                 HStack(spacing: 3) {
-                                    Circle().fill(Color.green).frame(width: 5, height: 5)
+                                    Circle().fill(Color.blue).frame(width: 5, height: 5)
                                     Text("Open").font(.caption).foregroundColor(.green)
                                 }
                                 .padding(.horizontal, 8)
@@ -2480,7 +3303,7 @@ struct CompactListCard: View {
                         Image(systemName: "star.fill").foregroundColor(.orange).font(.caption2)
                         Text(String(format: "%.1f", business.rating)).font(.caption2)
                         if let distance = distance {
-                            Text("â€¢").foregroundColor(.secondary).font(.caption2)
+                            Text("•").foregroundColor(.secondary).font(.caption2)
                             Text(formatDistance(distance)).font(.caption2).foregroundColor(.secondary)
                         }
                     }
@@ -2502,3 +3325,4 @@ struct CompactListCard: View {
         distance < 1000 ? String(format: "%.0f m", distance) : String(format: "%.1f km", distance / 1000)
     }
 }
+

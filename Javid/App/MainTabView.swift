@@ -17,17 +17,17 @@ struct MainTabView: View {
                     Label("Search", systemImage: "magnifyingglass")
                 }
             
-//            JobsMainView()
-//                .environmentObject(authViewModel)
-//                .tabItem {
-//                    Label("Jobs", systemImage: "briefcase.fill")
-//                }
+            JobsMainView()
+                .environmentObject(authViewModel)
+                .tabItem {
+                    Label("Jobs", systemImage: "briefcase.fill")
+                }
             
-//            MarketplaceView()
-//                .environmentObject(authViewModel)
-//                .tabItem {
-//                    Label("Marketplace", systemImage: "cart")
-//                }
+            MarketplaceView()
+                .environmentObject(authViewModel)
+                .tabItem {
+                    Label("Marketplace", systemImage: "cart")
+                }
             
             ProfileView(authViewModel: authViewModel, businessViewModel: businessViewModel)
                 .tabItem {
