@@ -4,6 +4,7 @@ struct MainTabView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @StateObject private var businessViewModel = BusinessViewModel()
     @StateObject private var favoriteViewModel = FavoriteViewModel()
+    @StateObject private var adminViewModel = AdminViewModel()
     
     var body: some View {
         TabView {
@@ -29,6 +30,17 @@ struct MainTabView: View {
                     Label("Marketplace", systemImage: "cart")
                 }
             
+            // Show Admin tab only for admin users
+            if authViewModel.userProfile?.isAdmin == true {
+                NavigationView {
+                    AdminDashboardView()
+                        .environmentObject(adminViewModel)
+                }
+                .tabItem {
+                    Label("Admin", systemImage: "gear.badge")
+                }
+            }
+            
             ProfileView(authViewModel: authViewModel, businessViewModel: businessViewModel)
                 .tabItem {
                     Label("Profile", systemImage: "person.fill")
@@ -37,5 +49,7 @@ struct MainTabView: View {
         .environmentObject(businessViewModel)
         .environmentObject(authViewModel)
         .environmentObject(favoriteViewModel)
+        .environmentObject(adminViewModel)
     }
 }
+

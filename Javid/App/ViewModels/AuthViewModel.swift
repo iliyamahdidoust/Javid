@@ -7,6 +7,7 @@ import LocalAuthentication
 
 class AuthViewModel: ObservableObject {
     @Published var isLoggedIn = false
+//    @Published var isAdmin: Bool = false
     @Published var currentUser: User?
     @Published var userProfile: UserProfile?
     @Published var errorMessage = ""
