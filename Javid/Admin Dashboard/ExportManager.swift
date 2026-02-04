@@ -1,18 +1,29 @@
+//
+//  ExportManager.swift
+//  Javid Admin Panel
+//
+//  Export data to various formats (CSV, JSON)
+//
+
 import Foundation
 import SwiftUI
 
 class ExportManager {
     
-    /// Export data to CSV format
-    static func exportToCSV<T>(data: [T], columns: [String], valueExtractor: (T) -> [String]) -> URL? {
+    // MARK: - CSV Export
+    
+    static func exportToCSV<T>(
+        data: [T],
+        columns: [String],
+        valueExtractor: (T) -> [String]
+    ) -> URL? {
         var csvText = columns.joined(separator: ",") + "\n"
         
         for item in data {
             let values = valueExtractor(item)
             let escapedValues = values.map { value in
-                // Escape quotes and wrap in quotes if contains comma
                 let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
-                return escaped.contains(",") ? "\"\(escaped)\"" : escaped
+                return escaped.contains(",") || escaped.contains("\n") ? "\"\(escaped)\"" : escaped
             }
             csvText += escapedValues.joined(separator: ",") + "\n"
         }
@@ -29,43 +40,43 @@ class ExportManager {
         }
     }
     
-    /// Export businesses to CSV
+    // MARK: - Business Export
+    
     static func exportBusinesses(_ businesses: [Business]) -> URL? {
-        let columns = ["ID", "Name", "Category", "City", "Country", "Rating", "Reviews", "Owner ID", "Phone", "Status"]
+        let columns = [
+            "ID", "Name", "Category", "City", "Country",
+            "Rating", "Reviews", "Owner ID", "Phone",
+            "Claimable", "Claim Status", "Featured", "Suspended"
+        ]
         
         return exportToCSV(data: businesses, columns: columns) { business in
-            // Handle claimStatus - it might be an enum or might not have displayName
-            let statusText: String
-            if let status = business.claimStatus {
-                // If claimStatus is an enum with displayName property, use it
-                // Otherwise convert to string directly
-                statusText = "\(status)"
-            } else {
-                statusText = "N/A"
-            }
-            
-            return [
+            [
                 business.id ?? "",
-                business.name ?? "",
-                business.category ?? "",
-                business.city ?? "",
-                business.country ?? "",
+                business.name,
+                business.category,
+                business.city,
+                business.country,
                 String(format: "%.1f", business.rating),
                 "\(business.reviewCount)",
-                business.ownerId ?? "",
-                business.phone ?? "",
-                statusText
+                business.ownerId,
+                business.phone,
+                business.isClaimable ? "Yes" : "No",
+                business.claimStatus ?? "N/A",
+                business.featured ? "Yes" : "No",
+                business.suspended ? "Yes" : "No"
             ]
         }
     }
     
-    /// Export users to CSV
+    // MARK: - User Export
+    
     static func exportUsers(_ users: [UserProfile]) -> URL? {
-        let columns = ["UID", "Name", "Email", "Phone", "Role", "Businesses Owned", "Join Date"]
+        let columns = [
+            "UID", "Name", "Email", "Phone", "Is Admin",
+            "Is Business Owner", "Claimed Businesses", "Join Date"
+        ]
         
         return exportToCSV(data: users, columns: columns) { user in
-            let role = user.isAdmin ? "Admin" : (user.isBusinessOwner ? "Business Owner" : "Regular User")
-            let businessCount = user.claimedBusinessIds?.count ?? 0
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
             let joinDate = user.createdAt.map { dateFormatter.string(from: $0) } ?? "N/A"
@@ -75,16 +86,21 @@ class ExportManager {
                 user.name,
                 user.email,
                 user.phoneNumber ?? "",
-                role,
-                "\(businessCount)",
+                user.isAdmin ? "Yes" : "No",
+                user.isBusinessOwner ? "Yes" : "No",
+                "\(user.claimedBusinessIds?.count ?? 0)",
                 joinDate
             ]
         }
     }
     
-    /// Export claims to CSV
+    // MARK: - Claim Export
+    
     static func exportClaims(_ claims: [BusinessClaim]) -> URL? {
-        let columns = ["ID", "Business Name", "Claimant", "Email", "Status", "Submitted Date", "Reviewed By"]
+        let columns = [
+            "ID", "Business Name", "Claimant Name", "Claimant Email",
+            "Status", "Email Verified", "Documents", "Submitted Date", "Reviewed By"
+        ]
         
         return exportToCSV(data: claims, columns: columns) { claim in
             let dateFormatter = DateFormatter()
@@ -97,15 +113,21 @@ class ExportManager {
                 claim.claimantName,
                 claim.claimantEmail,
                 claim.status.displayName,
+                claim.emailVerified ? "Yes" : "No",
+                "\(claim.verificationDocuments.count)",
                 submitDate,
-                claim.reviewerName ?? ""
+                claim.reviewerName ?? "Not reviewed"
             ]
         }
     }
     
-    /// Export reviews to CSV
+    // MARK: - Review Export
+    
     static func exportReviews(_ reviews: [Review]) -> URL? {
-        let columns = ["ID", "Business ID", "User", "Rating", "Comment", "Date"]
+        let columns = [
+            "ID", "Business ID", "User Name", "User Email",
+            "Rating", "Comment", "Date", "Has Owner Response"
+        ]
         
         return exportToCSV(data: reviews, columns: columns) { review in
             let dateFormatter = DateFormatter()
@@ -116,16 +138,22 @@ class ExportManager {
                 review.id ?? "N/A",
                 review.businessId,
                 review.userName,
+                review.userEmail,
                 "\(review.rating)",
                 review.comment.replacingOccurrences(of: "\n", with: " "),
-                reviewDate
+                reviewDate,
+                review.ownerResponse != nil ? "Yes" : "No"
             ]
         }
     }
     
-    /// Export bookings to CSV
+    // MARK: - Booking Export
+    
     static func exportBookings(_ bookings: [Booking]) -> URL? {
-        let columns = ["ID", "Business", "User", "Date", "Time Slot", "Party Size", "Status"]
+        let columns = [
+            "ID", "Business Name", "User Name", "User Email", "User Phone",
+            "Date", "Time Slot", "Party Size", "Status", "Special Requests"
+        ]
         
         return exportToCSV(data: bookings, columns: columns) { booking in
             let dateFormatter = DateFormatter()
@@ -136,17 +164,24 @@ class ExportManager {
                 booking.id ?? "N/A",
                 booking.businessName,
                 booking.userName,
+                booking.userEmail,
+                booking.userPhone,
                 bookingDate,
                 booking.timeSlot,
                 "\(booking.partySize)",
-                booking.status.displayName
+                booking.status.displayName,
+                booking.specialRequests ?? ""
             ]
         }
     }
     
-    /// Export activity log to CSV
+    // MARK: - Activity Log Export
+    
     static func exportActivityLog(_ entries: [ActivityLogEntry]) -> URL? {
-        let columns = ["Timestamp", "Admin", "Action", "Target Type", "Target Name", "Details"]
+        let columns = [
+            "Timestamp", "Admin Name", "Action", "Target Type",
+            "Target Name", "Details"
+        ]
         
         return exportToCSV(data: entries, columns: columns) { entry in
             let dateFormatter = DateFormatter()
@@ -154,13 +189,10 @@ class ExportManager {
             dateFormatter.timeStyle = .short
             let timestamp = dateFormatter.string(from: entry.timestamp)
             
-            // Convert action to string - use displayName if available, otherwise convert enum to string
-            let actionText = entry.action.rawValue
-            
             return [
                 timestamp,
                 entry.adminName,
-                actionText,
+                entry.action.rawValue,
                 entry.targetType,
                 entry.targetName,
                 entry.details
@@ -168,37 +200,40 @@ class ExportManager {
         }
     }
     
-    /// Share file using system share sheet
-    static func shareFile(url: URL, from viewController: UIViewController? = nil) {
-        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    // MARK: - JSON Export
+    
+    static func exportToJSON<T: Encodable>(_ data: [T], filename: String) -> URL? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         
-        // For iPad, set source view
-        if let popover = activityVC.popoverPresentationController {
-            popover.sourceView = viewController?.view
-            popover.sourceRect = CGRect(x: UIScreen.main.bounds.width / 2,
-                                       y: UIScreen.main.bounds.height / 2,
-                                       width: 0, height: 0)
-            popover.permittedArrowDirections = []
-        }
-        
-        if let vc = viewController {
-            vc.present(activityVC, animated: true)
-        } else if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let rootVC = windowScene.windows.first?.rootViewController {
-            rootVC.present(activityVC, animated: true)
+        do {
+            let jsonData = try encoder.encode(data)
+            let fileName = "\(filename)_\(Date().timeIntervalSince1970).json"
+            let path = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            try jsonData.write(to: path)
+            return path
+        } catch {
+            print("Error creating JSON: \(error)")
+            return nil
         }
     }
 }
 
-/// SwiftUI wrapper for export sharing
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
 
+extension BusinessClaimStatus {
+    var displayName: String {
+        switch self {
+        case .pending:
+            return "Pending"
+        case .approved:
+            return "Approved"
+        case .rejected:
+            return "Rejected"
+        case .underReview:
+            return "Under Review"
+        @unknown default:
+            return String(describing: self)
+        }
+    }
+}

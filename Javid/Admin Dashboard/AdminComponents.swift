@@ -1,4 +1,13 @@
+//
+//  AdminComponents.swift
+//  Javid Admin Panel
+//
+//  Reusable, well-designed admin UI components
+//
+
 import SwiftUI
+
+// MARK: - Metric Card
 
 struct MetricCard: View {
     let title: String
@@ -6,6 +15,7 @@ struct MetricCard: View {
     let trend: Double?
     let icon: String
     let color: Color
+    var subtitle: String?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -13,6 +23,11 @@ struct MetricCard: View {
                 Image(systemName: icon)
                     .font(.title2)
                     .foregroundColor(color)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(color.opacity(0.15))
+                    )
                 
                 Spacer()
                 
@@ -21,15 +36,26 @@ struct MetricCard: View {
                 }
             }
             
-            Text(value)
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(.primary)
+            Spacer()
             
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
         .padding(20)
+        .frame(minHeight: 140)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
@@ -38,29 +64,32 @@ struct MetricCard: View {
     }
 }
 
+// MARK: - Trend Indicator
+
 struct TrendIndicator: View {
     let value: Double
     
+    private var isPositive: Bool { value >= 0 }
+    
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: value >= 0 ? "arrow.up.right" : "arrow.down.right")
-                .font(.caption)
+            Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                .font(.caption.weight(.semibold))
             
             Text(String(format: "%.1f%%", abs(value)))
-                .font(.caption)
-                .fontWeight(.semibold)
+                .font(.caption.weight(.semibold))
         }
-        .foregroundColor(value >= 0 ? .green : .red)
+        .foregroundColor(isPositive ? .green : .red)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill((value >= 0 ? Color.green : Color.red).opacity(0.1))
+                .fill((isPositive ? Color.green : Color.red).opacity(0.1))
         )
     }
 }
 
-// MARK: - Action Button Component
+// MARK: - Action Button
 
 struct AdminActionButton: View {
     let title: String
@@ -70,7 +99,7 @@ struct AdminActionButton: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
                 
@@ -81,43 +110,53 @@ struct AdminActionButton: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(color)
             )
         }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Search Bar Component
+// MARK: - Search Bar
 
 struct AdminSearchBar: View {
     @Binding var searchText: String
     let placeholder: String
+    var onCommit: (() -> Void)?
     
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
             
-            TextField(placeholder, text: $searchText)
-                .textFieldStyle(.plain)
+            TextField(placeholder, text: $searchText, onCommit: {
+                onCommit?()
+            })
+            .textFieldStyle(.plain)
+            .autocapitalization(.none)
+            .disableAutocorrection(true)
             
             if !searchText.isEmpty {
-                Button(action: { searchText = "" }) {
+                Button(action: {
+                    searchText = ""
+                    onCommit?()
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.systemGray6))
         )
     }
 }
 
-// MARK: - Filter Chip Component
+// MARK: - Filter Chip
 
 struct AdminFilterChip: View {
     let title: String
@@ -133,33 +172,35 @@ struct AdminFilterChip: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 10)
                         .fill(isActive ? Color.blue : Color(.systemGray6))
                 )
         }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Loading View Component
+// MARK: - Loading View
 
 struct LoadingView: View {
     let message: String
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.5)
+                .tint(.blue)
             
             Text(message)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Color(.systemGroupedBackground))
     }
 }
 
-// MARK: - Empty State Component
+// MARK: - Empty State View
 
 struct EmptyStateView: View {
     let icon: String
@@ -168,7 +209,13 @@ struct EmptyStateView: View {
     let actionTitle: String?
     let action: (() -> Void)?
     
-    init(icon: String, title: String, message: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+    init(
+        icon: String,
+        title: String,
+        message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         self.icon = icon
         self.title = title
         self.message = message
@@ -177,20 +224,22 @@ struct EmptyStateView: View {
     }
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             Image(systemName: icon)
                 .font(.system(size: 64))
                 .foregroundColor(.secondary)
             
-            Text(title)
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text(message)
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+            VStack(spacing: 8) {
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text(message)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
             
             if let actionTitle = actionTitle, let action = action {
                 Button(action: action) {
@@ -200,19 +249,19 @@ struct EmptyStateView: View {
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
                         .background(
-                            RoundedRectangle(cornerRadius: 10)
+                            RoundedRectangle(cornerRadius: 12)
                                 .fill(Color.blue)
                         )
                 }
-                .padding(.top, 8)
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Color(.systemGroupedBackground))
     }
 }
 
-// MARK: - Status Badge Component
+// MARK: - Status Badge
 
 struct AdminStatusBadge: View {
     let text: String
@@ -223,16 +272,16 @@ struct AdminStatusBadge: View {
             .font(.caption)
             .fontWeight(.semibold)
             .foregroundColor(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(color)
             )
     }
 }
 
-// MARK: - Section Header Component
+// MARK: - Section Header
 
 struct AdminSectionHeader: View {
     let title: String
@@ -240,7 +289,12 @@ struct AdminSectionHeader: View {
     let actionTitle: String?
     let action: (() -> Void)?
     
-    init(title: String, icon: String? = nil, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+    init(
+        title: String,
+        icon: String? = nil,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         self.title = title
         self.icon = icon
         self.actionTitle = actionTitle
@@ -249,15 +303,15 @@ struct AdminSectionHeader: View {
     
     var body: some View {
         HStack {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if let icon = icon {
                     Image(systemName: icon)
-                        .font(.title2)
+                        .font(.title3)
                         .foregroundColor(.blue)
                 }
                 
                 Text(title)
-                    .font(.title2)
+                    .font(.title3)
                     .fontWeight(.bold)
             }
             
@@ -275,13 +329,44 @@ struct AdminSectionHeader: View {
                     }
                     .foregroundColor(.blue)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 8)
     }
 }
 
-// MARK: - Confirmation Dialog Component
+// MARK: - Info Row
+
+struct AdminInfoRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text(subtitle)
+                    .font(.body)
+                    .foregroundColor(.primary)
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Confirmation Dialog
 
 struct ConfirmationDialog: View {
     let title: String
@@ -292,8 +377,12 @@ struct ConfirmationDialog: View {
     let onCancel: () -> Void
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(confirmColor)
+                
                 Text(title)
                     .font(.title3)
                     .fontWeight(.semibold)
@@ -302,6 +391,7 @@ struct ConfirmationDialog: View {
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
             
             VStack(spacing: 12) {
@@ -316,6 +406,7 @@ struct ConfirmationDialog: View {
                                 .fill(confirmColor)
                         )
                 }
+                .buttonStyle(.plain)
                 
                 Button(action: onCancel) {
                     Text("Cancel")
@@ -328,14 +419,114 @@ struct ConfirmationDialog: View {
                                 .fill(Color(.systemGray6))
                         )
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 20)
                 .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.2), radius: 20)
         )
-        .shadow(color: .black.opacity(0.2), radius: 20)
         .padding(40)
+    }
+}
+
+// MARK: - Stats Overview Card
+
+struct StatsOverviewCard: View {
+    let title: String
+    let stats: [(label: String, value: String, color: Color)]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            VStack(spacing: 12) {
+                ForEach(stats.indices, id: \.self) { index in
+                    HStack {
+                        Circle()
+                            .fill(stats[index].color)
+                            .frame(width: 8, height: 8)
+                        
+                        Text(stats[index].label)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Spacer()
+                        
+                        Text(stats[index].value)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        )
+    }
+}
+
+// MARK: - Tab Selector (FIXED)
+
+struct TabSelector<T: Hashable & RawRepresentable>: View where T.RawValue == String {
+    let tabs: [T]
+    @Binding var selection: T
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(tabs, id: \.self) { tab in
+                    Button(action: { selection = tab }) {
+                        Text(tab.rawValue)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(selection == tab ? .white : .primary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(selection == tab ? Color.blue : Color(.systemGray6))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Progress Bar
+
+struct ProgressBar: View {
+    let value: Double
+    let total: Double
+    let color: Color
+    
+    private var percentage: Double {
+        guard total > 0 else { return 0 }
+        return min(value / total, 1.0)
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(color)
+                    .frame(width: geometry.size.width * percentage)
+            }
+        }
+        .frame(height: 8)
     }
 }

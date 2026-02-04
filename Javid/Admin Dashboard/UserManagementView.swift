@@ -1,8 +1,8 @@
 //
 //  UserManagementView.swift
-//  Javid Admin Dashboard
+//  Javid Admin Panel
 //
-//  Complete user management with role changes, suspensions, and user details
+//  Complete user management with role changes and user details
 //
 
 import SwiftUI
@@ -10,7 +10,6 @@ import FirebaseAuth
 
 struct UserManagementView: View {
     @EnvironmentObject var adminVM: AdminViewModel
-    @State private var selectedUsers: Set<String> = []
     @State private var showingUserDetail: UserProfile?
     @State private var showingSuspendDialog = false
     @State private var userToSuspend: UserProfile?
@@ -61,13 +60,9 @@ struct UserManagementView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
             toolbarSection
-            
-            // Search and Filters
             searchSection
             
-            // Users List
             if adminVM.isLoading {
                 LoadingView(message: "Loading users...")
             } else if filteredSortedUsers.isEmpty {
@@ -82,6 +77,7 @@ struct UserManagementView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Users (\(filteredSortedUsers.count))")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(item: $showingUserDetail) { user in
             UserDetailView(user: user)
                 .environmentObject(adminVM)
@@ -91,7 +87,7 @@ struct UserManagementView: View {
             Button("Cancel", role: .cancel) {}
             Button("Suspend", role: .destructive) {
                 Task {
-                    try? await adminVM.suspendUser(user: user, reason: suspensionReason)
+                    try? await adminVM.suspendUser(user, reason: suspensionReason)
                     suspensionReason = ""
                     userToSuspend = nil
                 }
@@ -104,7 +100,7 @@ struct UserManagementView: View {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 Task {
-                    try? await adminVM.deleteUser(user: user)
+                    try? await adminVM.deleteUser(user)
                     userToDelete = nil
                 }
             }
@@ -113,11 +109,10 @@ struct UserManagementView: View {
         }
     }
     
-    // MARK: - Toolbar Section
+    // MARK: - Toolbar
     
     private var toolbarSection: some View {
         HStack(spacing: 12) {
-            // Role Filter
             Menu {
                 Button(action: { roleFilter = nil }) {
                     HStack {
@@ -157,7 +152,7 @@ struct UserManagementView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "person.2.circle")
-                    Text(roleFilter == nil ? "All Roles" : (roleFilter == "admin" ? "Admins" : roleFilter == "business_owner" ? "Business Owners" : "Regular"))
+                    Text(roleName)
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
@@ -165,7 +160,6 @@ struct UserManagementView: View {
             
             Spacer()
             
-            // Sort Menu
             Menu {
                 ForEach(UserSortOption.allCases, id: \.self) { option in
                     Button(action: { sortBy = option }) {
@@ -186,12 +180,7 @@ struct UserManagementView: View {
                 }
             }
             
-            // Export Button
-            Button(action: {
-                if let url = ExportManager.exportUsers(filteredSortedUsers) {
-                    // Present share sheet
-                }
-            }) {
+            Button(action: exportUsers) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.subheadline)
             }
@@ -201,20 +190,26 @@ struct UserManagementView: View {
         .shadow(color: .black.opacity(0.05), radius: 2, y: 2)
     }
     
-    // MARK: - Search Section
+    private var roleName: String {
+        switch roleFilter {
+        case "admin": return "Admins"
+        case "business_owner": return "Business Owners"
+        case "regular": return "Regular"
+        default: return "All Roles"
+        }
+    }
+    
+    // MARK: - Search
     
     private var searchSection: some View {
         AdminSearchBar(
             searchText: $adminVM.userFilter.searchText,
             placeholder: "Search by name, email, or phone..."
         )
-        .onChange(of: adminVM.userFilter.searchText) { _ in
-            adminVM.applyUserFilter()
-        }
         .padding()
     }
     
-    // MARK: - Users List Section
+    // MARK: - Users List
     
     private var usersListSection: some View {
         ScrollView {
@@ -225,17 +220,17 @@ struct UserManagementView: View {
                         onTap: { showingUserDetail = user },
                         onPromoteToBusinessOwner: {
                             Task {
-                                try? await adminVM.promoteToBusinessOwner(user: user)
+                                try? await adminVM.updateUserRole(user, isBusinessOwner: true)
                             }
                         },
                         onPromoteToAdmin: {
                             Task {
-                                try? await adminVM.promoteToAdmin(user: user)
+                                try? await adminVM.updateUserRole(user, isAdmin: true)
                             }
                         },
                         onDemoteAdmin: {
                             Task {
-                                try? await adminVM.demoteAdmin(user: user)
+                                try? await adminVM.updateUserRole(user, isAdmin: false)
                             }
                         },
                         onSuspend: {
@@ -252,9 +247,15 @@ struct UserManagementView: View {
             .padding()
         }
     }
+    
+    private func exportUsers() {
+        if let url = ExportManager.exportUsers(filteredSortedUsers) {
+            // Would present share sheet here
+        }
+    }
 }
 
-// MARK: - User Row Component
+// MARK: - User Row
 
 struct UserRow: View {
     let user: UserProfile
@@ -288,14 +289,13 @@ struct UserRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Profile Image
                 if let imageURL = user.profileImageURL, let url = URL(string: imageURL) {
                     AsyncImage(url: url) { image in
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Circle().fill(Color.gray.opacity(0.3))
+                        Circle().fill(roleColor.opacity(0.2))
                     }
                     .frame(width: 50, height: 50)
                     .clipShape(Circle())
@@ -304,14 +304,13 @@ struct UserRow: View {
                         .fill(roleColor.opacity(0.2))
                         .frame(width: 50, height: 50)
                         .overlay(
-                            Text(user.name.prefix(1).uppercased())
+                            Text(user.initials)
                                 .font(.title3)
                                 .fontWeight(.semibold)
                                 .foregroundColor(roleColor)
                         )
                 }
                 
-                // User Info
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.name)
                         .font(.headline)
@@ -320,6 +319,7 @@ struct UserRow: View {
                     Text(user.email)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                     
                     HStack(spacing: 12) {
                         AdminStatusBadge(text: roleText, color: roleColor)
@@ -334,16 +334,11 @@ struct UserRow: View {
                             }
                             .foregroundColor(.secondary)
                         }
-                        
-                        Text("Joined \(formatDate(user.createdAt))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
                 Spacer()
                 
-                // Actions Menu
                 Menu {
                     Button(action: onTap) {
                         Label("View Details", systemImage: "eye")
@@ -396,13 +391,6 @@ struct UserRow: View {
         }
         .buttonStyle(.plain)
     }
-    
-    private func formatDate(_ date: Date?) -> String {
-        guard let date = date else { return "Unknown" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        return formatter.string(from: date)
-    }
 }
 
 // MARK: - User Detail View
@@ -416,22 +404,13 @@ struct UserDetailView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Profile Header
                     profileHeaderSection
-                    
-                    // User Information
                     userInfoSection
-                    
-                    // Account Statistics
                     statisticsSection
                     
-                    // Businesses Owned (if any)
                     if let businessIds = user.claimedBusinessIds, !businessIds.isEmpty {
                         businessesSection(businessIds: businessIds)
                     }
-                    
-                    // Activity Section
-                    activitySection
                 }
                 .padding()
             }
@@ -440,19 +419,14 @@ struct UserDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
+                    Button("Close") { dismiss() }
                 }
             }
         }
     }
     
-    // MARK: - Profile Header
-    
     private var profileHeaderSection: some View {
         VStack(spacing: 16) {
-            // Profile Image
             if let imageURL = user.profileImageURL, let url = URL(string: imageURL) {
                 AsyncImage(url: url) { image in
                     image
@@ -468,7 +442,7 @@ struct UserDetailView: View {
                     .fill(Color.blue.opacity(0.2))
                     .frame(width: 100, height: 100)
                     .overlay(
-                        Text(user.name.prefix(1).uppercased())
+                        Text(user.initials)
                             .font(.system(size: 48, weight: .semibold))
                             .foregroundColor(.blue)
                     )
@@ -503,19 +477,20 @@ struct UserDetailView: View {
         )
     }
     
-    // MARK: - User Info Section
-    
     private var userInfoSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             AdminSectionHeader(title: "Account Information", icon: "person.fill")
             
             VStack(alignment: .leading, spacing: 12) {
-                InfoRow(icon: "person", title: "User ID", subtitle: user.uid)
-                InfoRow(icon: "phone.fill", title: "Phone Number", subtitle: user.phoneNumber ?? "Not provided")
-                InfoRow(icon: "calendar", title: "Join Date", subtitle: formatDate(user.createdAt))
+                AdminInfoRow(icon: "person", title: "User ID", subtitle: user.uid)
+                AdminInfoRow(icon: "phone.fill", title: "Phone Number", subtitle: user.phoneNumber ?? "Not provided")
+                
+                if let createdAt = user.createdAt {
+                    AdminInfoRow(icon: "calendar", title: "Join Date", subtitle: formatDate(createdAt))
+                }
                 
                 if let bio = user.bio, !bio.isEmpty {
-                    InfoRow(icon: "text.alignleft", title: "Bio", subtitle: bio)
+                    AdminInfoRow(icon: "text.alignleft", title: "Bio", subtitle: bio)
                 }
             }
             .padding()
@@ -526,8 +501,6 @@ struct UserDetailView: View {
         }
     }
     
-    // MARK: - Statistics Section
-    
     private var statisticsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             AdminSectionHeader(title: "Statistics", icon: "chart.bar.fill")
@@ -536,38 +509,22 @@ struct UserDetailView: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 12) {
-                UserManagementStatCard(
+                AdminStatCard(
                     title: "Businesses Owned",
                     value: "\(user.claimedBusinessIds?.count ?? 0)",
                     icon: "building.2.fill",
                     color: .blue
                 )
                 
-                UserManagementStatCard(
-                    title: "Reviews Written",
-                    value: "0", // Would need to fetch
-                    icon: "star.fill",
-                    color: .orange
-                )
-                
-                UserManagementStatCard(
-                    title: "Favorites",
-                    value: "0", // Would need to fetch
-                    icon: "heart.fill",
-                    color: .red
-                )
-                
-                UserManagementStatCard(
-                    title: "Bookings",
-                    value: "0", // Would need to fetch
-                    icon: "calendar.badge.clock",
-                    color: .purple
+                AdminStatCard(
+                    title: "Account Status",
+                    value: user.isAdmin ? "Admin" : "Active",
+                    icon: "checkmark.seal.fill",
+                    color: .green
                 )
             }
         }
     }
-    
-    // MARK: - Businesses Section
     
     private func businessesSection(businessIds: [String]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -583,26 +540,7 @@ struct UserDetailView: View {
         }
     }
     
-    // MARK: - Activity Section
-    
-    private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            AdminSectionHeader(title: "Recent Activity", icon: "clock.fill")
-            
-            Text("No recent activity")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.systemBackground))
-                )
-        }
-    }
-    
-    private func formatDate(_ date: Date?) -> String {
-        guard let date = date else { return "Unknown" }
+    private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .long
         formatter.timeStyle = .short
@@ -610,9 +548,9 @@ struct UserDetailView: View {
     }
 }
 
-// MARK: - Stat Card Component
+// MARK: - Stat Card
 
-struct UserManagementStatCard: View {
+struct AdminStatCard: View {
     let title: String
     let value: String
     let icon: String
@@ -641,7 +579,7 @@ struct UserManagementStatCard: View {
     }
 }
 
-// MARK: - Business Quick Card Component
+// MARK: - Business Quick Card
 
 struct BusinessQuickCard: View {
     let business: Business
@@ -692,4 +630,3 @@ struct BusinessQuickCard: View {
         )
     }
 }
-

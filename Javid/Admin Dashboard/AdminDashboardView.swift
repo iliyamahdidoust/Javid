@@ -1,6 +1,6 @@
 //
 //  AdminDashboardView.swift
-//  Javid Admin Dashboard
+//  Javid Admin Panel
 //
 //  Main container view for the admin dashboard with tab navigation
 //
@@ -12,15 +12,15 @@ struct AdminDashboardView: View {
     @StateObject private var adminVM = AdminViewModel()
     @State private var selectedTab: AdminTab = .dashboard
     
-    enum AdminTab: String, CaseIterable {
+    enum AdminTab: String, CaseIterable, Identifiable {
         case dashboard = "Dashboard"
         case businesses = "Businesses"
         case claims = "Claims"
         case users = "Users"
         case reviews = "Reviews"
         case bookings = "Bookings"
-        case analytics = "Analytics"
-        case settings = "Settings"
+        
+        var id: String { rawValue }
         
         var icon: String {
             switch self {
@@ -36,15 +36,10 @@ struct AdminDashboardView: View {
                 return "star.fill"
             case .bookings:
                 return "calendar.badge.clock"
-            case .analytics:
-                return "chart.bar.fill"
-            case .settings:
-                return "gear"
             }
         }
         
         var badge: Int? {
-            // This would be dynamically calculated
             return nil
         }
     }
@@ -79,7 +74,7 @@ struct AdminDashboardView: View {
     
     private var mainDashboard: some View {
         TabView(selection: $selectedTab) {
-            ForEach(AdminTab.allCases, id: \.self) { tab in
+            ForEach(AdminTab.allCases) { tab in
                 NavigationView {
                     viewForTab(tab)
                 }
@@ -90,6 +85,7 @@ struct AdminDashboardView: View {
             }
         }
         .environmentObject(adminVM)
+        .accentColor(.blue)
     }
     
     // MARK: - View Routing
@@ -109,10 +105,6 @@ struct AdminDashboardView: View {
             ReviewManagementView()
         case .bookings:
             BookingManagementView()
-        case .analytics:
-            AnalyticsView()
-        case .settings:
-            AdminSettingsView()
         }
     }
 }
@@ -136,22 +128,10 @@ struct LoginRequiredView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
-            
-            Button(action: {
-                // Navigate to login
-            }) {
-                Text("Sign In")
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(width: 200)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.blue)
-                    )
-            }
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
 }
 
@@ -177,7 +157,6 @@ struct AccessDeniedView: View {
             }
             
             Button(action: {
-                // Sign out
                 try? Auth.auth().signOut()
             }) {
                 Text("Sign Out")
@@ -192,42 +171,121 @@ struct AccessDeniedView: View {
             }
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
 }
 
-// MARK: - Review Management View (Placeholder)
+// MARK: - Review Management View
 
 struct ReviewManagementView: View {
     @EnvironmentObject var adminVM: AdminViewModel
+    @State private var selectedRating: Int? = nil
+    @State private var showingDeleteDialog = false
+    @State private var reviewToDelete: Review?
+    @State private var deletionReason = ""
+    
+    var filteredReviews: [Review] {
+        var reviews = adminVM.filteredReviews
+        
+        if let rating = selectedRating {
+            reviews = reviews.filter { Int($0.rating) == rating }
+        }
+        
+        return reviews.sorted { $0.createdAt > $1.createdAt }
+    }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Text("Review Management")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("\(adminVM.allReviews.count) total reviews")
-                    .foregroundColor(.secondary)
-                
-                LazyVStack(spacing: 12) {
-                    ForEach(adminVM.allReviews) { review in
-                        ReviewCard(review: review)
-                    }
-                }
-                .padding()
+        VStack(spacing: 0) {
+            ratingFilterSection
+            searchSection
+            
+            if adminVM.isLoading {
+                LoadingView(message: "Loading reviews...")
+            } else if filteredReviews.isEmpty {
+                EmptyStateView(
+                    icon: "star",
+                    title: "No Reviews Found",
+                    message: "No reviews match your filters"
+                )
+            } else {
+                reviewsListSection
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Reviews")
+        .navigationTitle("Reviews (\(filteredReviews.count))")
+        .navigationBarTitleDisplayMode(.large)
+        .alert("Delete Review", isPresented: $showingDeleteDialog, presenting: reviewToDelete) { review in
+            TextField("Reason for deletion", text: $deletionReason)
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    try? await adminVM.deleteReview(review, reason: deletionReason)
+                    deletionReason = ""
+                    reviewToDelete = nil
+                }
+            }
+            .disabled(deletionReason.isEmpty)
+        } message: { _ in
+            Text("Please provide a reason for deleting this review. The user will be notified.")
+        }
+    }
+    
+    private var ratingFilterSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                AdminFilterButton(
+                    title: "All",
+                    count: adminVM.allReviews.count,
+                    isSelected: selectedRating == nil
+                ) {
+                    selectedRating = nil
+                }
+                
+                ForEach(1...5, id: \.self) { rating in
+                    AdminFilterButton(
+                        title: "\(rating) ★",
+                        count: adminVM.allReviews.filter { Int($0.rating) == rating }.count,
+                        isSelected: selectedRating == rating
+                    ) {
+                        selectedRating = rating
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+    }
+    
+    private var searchSection: some View {
+        AdminSearchBar(
+            searchText: $adminVM.reviewFilter.searchText,
+            placeholder: "Search reviews..."
+        )
+        .padding()
+    }
+    
+    private var reviewsListSection: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(filteredReviews) { review in
+                    ReviewCard(review: review) {
+                        reviewToDelete = review
+                        showingDeleteDialog = true
+                    }
+                }
+            }
+            .padding()
+        }
     }
 }
 
+// MARK: - Review Card
+
 struct ReviewCard: View {
     let review: Review
-    @EnvironmentObject var adminVM: AdminViewModel
-    @State private var showingDeleteConfirmation = false
-    @State private var deletionReason = ""
+    let onDelete: () -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -248,7 +306,7 @@ struct ReviewCard: View {
                 Spacer()
                 
                 Menu {
-                    Button(role: .destructive, action: { showingDeleteConfirmation = true }) {
+                    Button(role: .destructive, action: onDelete) {
                         Label("Delete Review", systemImage: "trash")
                     }
                 } label: {
@@ -260,9 +318,16 @@ struct ReviewCard: View {
             Text(review.comment)
                 .font(.body)
             
-            Text(formatDate(review.createdAt))
-                .font(.caption)
-                .foregroundColor(.secondary)
+            HStack {
+                Text(formatDate(review.createdAt))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if review.ownerResponse != nil {
+                    Spacer()
+                    AdminStatusBadge(text: "Owner Responded", color: .green)
+                }
+            }
         }
         .padding()
         .background(
@@ -270,19 +335,6 @@ struct ReviewCard: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
         )
-        .alert("Delete Review", isPresented: $showingDeleteConfirmation) {
-            TextField("Reason for deletion", text: $deletionReason)
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    try? await adminVM.deleteReview(review, reason: deletionReason)
-                    deletionReason = ""
-                }
-            }
-            .disabled(deletionReason.isEmpty)
-        } message: {
-            Text("Please provide a reason for deleting this review. The user will be notified.")
-        }
     }
     
     private func formatDate(_ date: Date) -> String {
@@ -292,39 +344,119 @@ struct ReviewCard: View {
     }
 }
 
-// MARK: - Booking Management View (Placeholder)
+// MARK: - Booking Management View
 
 struct BookingManagementView: View {
     @EnvironmentObject var adminVM: AdminViewModel
+    @State private var selectedStatus: BookingStatus? = nil
+    @State private var showingCancelDialog = false
+    @State private var bookingToCancel: Booking?
+    @State private var cancellationReason = ""
+    
+    var filteredBookings: [Booking] {
+        var bookings = adminVM.allBookings
+        
+        if let status = selectedStatus {
+            bookings = bookings.filter { $0.status == status }
+        }
+        
+        return bookings.sorted { $0.date > $1.date }
+    }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Text("Booking Management")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("\(adminVM.allBookings.count) total bookings")
-                    .foregroundColor(.secondary)
-                
-                LazyVStack(spacing: 12) {
-                    ForEach(adminVM.allBookings) { booking in
-                        BookingCard(booking: booking)
-                    }
-                }
-                .padding()
+        VStack(spacing: 0) {
+            statusFilterSection
+            searchSection
+            
+            if adminVM.isLoading {
+                LoadingView(message: "Loading bookings...")
+            } else if filteredBookings.isEmpty {
+                EmptyStateView(
+                    icon: "calendar",
+                    title: "No Bookings Found",
+                    message: "No bookings match your filters"
+                )
+            } else {
+                bookingsListSection
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Bookings")
+        .navigationTitle("Bookings (\(filteredBookings.count))")
+        .navigationBarTitleDisplayMode(.large)
+        .alert("Cancel Booking", isPresented: $showingCancelDialog, presenting: bookingToCancel) { booking in
+            TextField("Reason for cancellation", text: $cancellationReason)
+            Button("Cancel", role: .cancel) {}
+            Button("Confirm Cancellation", role: .destructive) {
+                Task {
+                    try? await adminVM.cancelBooking(booking, reason: cancellationReason)
+                    cancellationReason = ""
+                    bookingToCancel = nil
+                }
+            }
+            .disabled(cancellationReason.isEmpty)
+        } message: { _ in
+            Text("Please provide a reason for cancelling this booking. Both the user and business owner will be notified.")
+        }
+    }
+    
+    private var statusFilterSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                AdminFilterButton(
+                    title: "All",
+                    count: adminVM.allBookings.count,
+                    isSelected: selectedStatus == nil
+                ) {
+                    selectedStatus = nil
+                }
+                
+                ForEach(BookingStatus.allCases, id: \.self) { status in
+                    AdminFilterButton(
+                        title: status.displayName,
+                        count: adminVM.allBookings.filter { $0.status == status }.count,
+                        isSelected: selectedStatus == status
+                    ) {
+                        selectedStatus = status
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+    }
+    
+    private var searchSection: some View {
+        HStack {
+            Text("\(filteredBookings.count) total bookings")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            Spacer()
+        }
+        .padding()
+    }
+    
+    private var bookingsListSection: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(filteredBookings) { booking in
+                    BookingCard(booking: booking) {
+                        bookingToCancel = booking
+                        showingCancelDialog = true
+                    }
+                }
+            }
+            .padding()
+        }
     }
 }
 
+// MARK: - Booking Card
+
 struct BookingCard: View {
     let booking: Booking
-    @EnvironmentObject var adminVM: AdminViewModel
-    @State private var showingCancelDialog = false
-    @State private var cancellationReason = ""
+    let onCancel: () -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -340,7 +472,7 @@ struct BookingCard: View {
                 
                 Spacer()
                 
-                AdminStatusBadge(text: booking.status.rawValue.capitalized, color: colorForBookingStatus(booking.status))
+                AdminStatusBadge(text: booking.status.displayName, color: colorForStatus(booking.status))
             }
             
             VStack(alignment: .leading, spacing: 8) {
@@ -350,7 +482,7 @@ struct BookingCard: View {
             }
             
             if booking.status == .pending || booking.status == .confirmed {
-                Button(action: { showingCancelDialog = true }) {
+                Button(action: onCancel) {
                     HStack {
                         Image(systemName: "xmark.circle.fill")
                         Text("Cancel Booking")
@@ -360,10 +492,7 @@ struct BookingCard: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.red)
-                    )
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.red))
                 }
             }
         }
@@ -373,33 +502,15 @@ struct BookingCard: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
         )
-        .alert("Cancel Booking", isPresented: $showingCancelDialog) {
-            TextField("Reason for cancellation", text: $cancellationReason)
-            Button("Cancel", role: .cancel) {}
-            Button("Confirm Cancellation", role: .destructive) {
-                Task {
-                    try? await adminVM.cancelBooking(booking, reason: cancellationReason)
-                    cancellationReason = ""
-                }
-            }
-            .disabled(cancellationReason.isEmpty)
-        } message: {
-            Text("Please provide a reason for cancelling this booking. Both the user and business owner will be notified.")
-        }
     }
     
-    private func colorForBookingStatus(_ status: BookingStatus) -> Color {
+    private func colorForStatus(_ status: BookingStatus) -> Color {
         switch status {
-        case .pending:
-            return .orange
-        case .confirmed:
-            return .green
-        case .cancelled:
-            return .red
-        case .completed:
-            return .blue
-        case .noShow:
-            return .gray
+        case .pending: return .orange
+        case .confirmed: return .green
+        case .cancelled: return .red
+        case .completed: return .blue
+        case .noShow: return .gray
         }
     }
     
@@ -410,7 +521,42 @@ struct BookingCard: View {
     }
 }
 
-// MARK: - Detail Row View
+// MARK: - Filter Button
+
+struct AdminFilterButton: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text("\(count)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(isSelected ? Color.blue : Color.secondary))
+            }
+            .foregroundColor(isSelected ? .blue : .secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.blue.opacity(0.1) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Detail Row
 
 struct DetailRow: View {
     let icon: String
@@ -426,102 +572,3 @@ struct DetailRow: View {
         }
     }
 }
-
-// MARK: - Analytics View (Placeholder)
-
-struct AnalyticsView: View {
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                Text("Analytics Dashboard")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("Comprehensive analytics and reports coming soon")
-                    .foregroundColor(.secondary)
-                
-                // Placeholder for charts
-                VStack(spacing: 16) {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 200)
-                        .overlay(Text("Business Growth Chart").foregroundColor(.secondary))
-                    
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 200)
-                        .overlay(Text("User Activity Chart").foregroundColor(.secondary))
-                    
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 200)
-                        .overlay(Text("Revenue Chart").foregroundColor(.secondary))
-                }
-                .padding()
-            }
-        }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("Analytics")
-    }
-}
-
-// MARK: - Settings View (Placeholder)
-
-struct AdminSettingsView: View {
-    @EnvironmentObject var adminVM: AdminViewModel
-    
-    var body: some View {
-        Form {
-            Section("Account") {
-                if let user = adminVM.currentUser {
-                    HStack {
-                        Text("Name")
-                        Spacer()
-                        Text(user.name)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Email")
-                        Spacer()
-                        Text(user.email)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            Section("Dashboard") {
-                Toggle("Enable Real-time Updates", isOn: .constant(true))
-                Toggle("Show Notifications", isOn: .constant(true))
-            }
-            
-            Section("Data Management") {
-                Button("Export All Data") {
-                    // Export functionality
-                }
-                
-                Button("Clear Cache") {
-                    // Clear cache
-                }
-            }
-            
-            Section {
-                Button("Sign Out") {
-                    try? Auth.auth().signOut()
-                    adminVM.checkAdminStatus()
-                }
-                .foregroundColor(.red)
-            }
-        }
-        .navigationTitle("Settings")
-    }
-}
-
-// MARK: - Preview
-
-struct AdminDashboardView_Previews: PreviewProvider {
-    static var previews: some View {
-        AdminDashboardView()
-    }
-}
-

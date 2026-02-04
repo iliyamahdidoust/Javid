@@ -74,8 +74,8 @@ class ClaimBusinessViewModel: ObservableObject {
             .whereField("businessId", isEqualTo: businessId)
             .whereField("claimantId", isEqualTo: userId)
             .whereField("status", in: [
-                ClaimStatus.pending.rawValue,
-                ClaimStatus.underReview.rawValue
+                "pending",
+                "underReview"
             ])
             .getDocuments { snapshot, error in
                 if let error = error {
@@ -241,7 +241,12 @@ class ClaimBusinessViewModel: ObservableObject {
             return
         }
         
-        guard claim.canBeCancelled else {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            completion(false, "User not logged in")
+            return
+        }
+        
+        guard claim.canBeCancelled(byUserId: currentUserId) else {
             completion(false, "This claim cannot be cancelled")
             return
         }

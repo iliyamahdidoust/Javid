@@ -1,13 +1,7 @@
-//
-//  AdminStats.swift
-//  Javid Admin Dashboard
-//
-//  Dashboard statistics and metrics models
-//
-
 import Foundation
 
-/// Statistics for the dashboard home view
+// MARK: - Dashboard Statistics
+
 struct AdminStats: Codable {
     var totalBusinesses: Int
     var totalUsers: Int
@@ -24,6 +18,14 @@ struct AdminStats: Codable {
     var businessTrend: Double
     var userTrend: Double
     var reviewTrend: Double
+    var bookingTrend: Double
+    
+    // Additional metrics
+    var averageRating: Double
+    var totalViews: Int
+    var totalFavorites: Int
+    var suspendedUsers: Int
+    var suspendedBusinesses: Int
     
     init() {
         self.totalBusinesses = 0
@@ -39,10 +41,17 @@ struct AdminStats: Codable {
         self.businessTrend = 0.0
         self.userTrend = 0.0
         self.reviewTrend = 0.0
+        self.bookingTrend = 0.0
+        self.averageRating = 0.0
+        self.totalViews = 0
+        self.totalFavorites = 0
+        self.suspendedUsers = 0
+        self.suspendedBusinesses = 0
     }
 }
 
-/// Business growth data point for charts
+// MARK: - Chart Data Models
+
 struct BusinessGrowthData: Identifiable {
     let id = UUID()
     let date: Date
@@ -50,7 +59,6 @@ struct BusinessGrowthData: Identifiable {
     let label: String
 }
 
-/// Category distribution for pie charts
 struct CategoryDistribution: Identifiable {
     let id = UUID()
     let category: String
@@ -58,15 +66,13 @@ struct CategoryDistribution: Identifiable {
     let percentage: Double
 }
 
-/// Geographic distribution data
 struct GeographicData: Identifiable {
     let id = UUID()
-    let location: String // City or Country
+    let location: String
     let count: Int
-    let businesses: [String] // Business IDs in this location
+    let businesses: [String]
 }
 
-/// Top rated businesses data
 struct TopRatedBusiness: Identifiable {
     let id: String
     let name: String
@@ -75,13 +81,30 @@ struct TopRatedBusiness: Identifiable {
     let category: String
 }
 
-/// Activity log entry for audit trail
+struct UserActivityData: Identifiable {
+    let id = UUID()
+    let date: Date
+    let newUsers: Int
+    let activeUsers: Int
+    let label: String
+}
+
+struct RevenueData: Identifiable {
+    let id = UUID()
+    let date: Date
+    let bookings: Int
+    let revenue: Double
+    let label: String
+}
+
+// MARK: - Activity Log
+
 struct ActivityLogEntry: Identifiable, Codable {
     let id: String
     let adminId: String
     let adminName: String
     let action: AdminAction
-    let targetType: String // "business", "user", "claim", "review", etc.
+    let targetType: String
     let targetId: String
     let targetName: String
     let details: String
@@ -91,6 +114,8 @@ struct ActivityLogEntry: Identifiable, Codable {
         case businessCreated = "Business Created"
         case businessUpdated = "Business Updated"
         case businessDeleted = "Business Deleted"
+        case businessFeatured = "Business Featured"
+        case businessSuspended = "Business Suspended"
         case userPromoted = "User Promoted"
         case userDemoted = "User Demoted"
         case userSuspended = "User Suspended"
@@ -104,26 +129,13 @@ struct ActivityLogEntry: Identifiable, Codable {
         case settingChanged = "Setting Changed"
         case bulkOperation = "Bulk Operation"
         case notificationSent = "Notification Sent"
+        case dataExported = "Data Exported"
     }
 }
 
-/// Export format options
-enum ExportFormat: String, CaseIterable {
-    case csv = "CSV"
-    case excel = "Excel"
-    case pdf = "PDF"
-    
-    var fileExtension: String {
-        switch self {
-        case .csv: return "csv"
-        case .excel: return "xlsx"
-        case .pdf: return "pdf"
-        }
-    }
-}
+// MARK: - Filter Criteria
 
-/// Filter criteria for various admin views
-struct AdminFilter {
+struct AdminFilter: Equatable {
     var searchText: String = ""
     var category: String?
     var city: String?
@@ -134,7 +146,7 @@ struct AdminFilter {
     var claimStatus: String?
     var role: String?
     
-    struct DateRange {
+    struct DateRange: Equatable {
         let start: Date
         let end: Date
     }
@@ -164,7 +176,35 @@ struct AdminFilter {
     }
 }
 
-/// Notification template for sending to users
+// MARK: - Export Options
+
+enum ExportFormat: String, CaseIterable {
+    case csv = "CSV"
+    case excel = "Excel"
+    case pdf = "PDF"
+    case json = "JSON"
+    
+    var fileExtension: String {
+        switch self {
+        case .csv: return "csv"
+        case .excel: return "xlsx"
+        case .pdf: return "pdf"
+        case .json: return "json"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .csv: return "tablecells"
+        case .excel: return "tablecells.fill"
+        case .pdf: return "doc.fill"
+        case .json: return "doc.text.fill"
+        }
+    }
+}
+
+// MARK: - Notification Management
+
 struct NotificationTemplate: Identifiable {
     let id = UUID()
     var title: String
@@ -178,5 +218,48 @@ struct NotificationTemplate: Identifiable {
         case regularUsers = "Regular Users"
         case specificCity = "Specific City"
         case specificUser = "Specific User"
+        case admins = "Admins"
+    }
+}
+
+// MARK: - System Settings
+
+struct AdminSettings: Codable {
+    var enableAutoApproval: Bool
+    var requireDocumentVerification: Bool
+    var maxClaimsPending: Int
+    var autoSuspendThreshold: Int
+    var enableEmailNotifications: Bool
+    var enablePushNotifications: Bool
+    var maintenanceMode: Bool
+    var featureFlags: [String: Bool]
+    
+    init() {
+        self.enableAutoApproval = false
+        self.requireDocumentVerification = true
+        self.maxClaimsPending = 10
+        self.autoSuspendThreshold = 5
+        self.enableEmailNotifications = true
+        self.enablePushNotifications = true
+        self.maintenanceMode = false
+        self.featureFlags = [:]
+    }
+}
+
+// MARK: - Performance Metrics
+
+struct PerformanceMetrics {
+    var avgResponseTime: Double
+    var activeConnections: Int
+    var cacheHitRate: Double
+    var errorRate: Double
+    var uptime: Double
+    
+    init() {
+        self.avgResponseTime = 0.0
+        self.activeConnections = 0
+        self.cacheHitRate = 0.0
+        self.errorRate = 0.0
+        self.uptime = 100.0
     }
 }

@@ -1,6 +1,6 @@
 //
 //  BusinessManagementView.swift
-//  Javid Admin Dashboard
+//  Javid Admin Panel
 //
 //  Complete business management with CRUD operations, filters, and bulk actions
 //
@@ -10,11 +10,8 @@ import SwiftUI
 struct BusinessManagementView: View {
     @EnvironmentObject var adminVM: AdminViewModel
     @State private var selectedBusinesses: Set<String> = []
-    @State private var showingAddBusiness = false
     @State private var showingDeleteConfirmation = false
     @State private var businessToDelete: Business?
-    @State private var showingSuspendDialog = false
-    @State private var businessToSuspend: Business?
     @State private var showingFilters = false
     @State private var sortOption: SortOption = .name
     @State private var showingExport = false
@@ -46,18 +43,13 @@ struct BusinessManagementView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
             toolbarSection
-            
-            // Search and Filters
             searchSection
             
-            // Active Filters Display
             if adminVM.businessFilter.isActive {
                 activeFiltersSection
             }
             
-            // Business List
             if adminVM.isLoading {
                 LoadingView(message: "Loading businesses...")
             } else if sortedBusinesses.isEmpty {
@@ -66,9 +58,7 @@ struct BusinessManagementView: View {
                     title: "No Businesses Found",
                     message: adminVM.businessFilter.isActive ?
                         "Try adjusting your filters" :
-                        "Add your first business to get started",
-                    actionTitle: "Add Business",
-                    action: { showingAddBusiness = true }
+                        "No businesses available"
                 )
             } else {
                 businessListSection
@@ -76,13 +66,10 @@ struct BusinessManagementView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Businesses (\(sortedBusinesses.count))")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $showingFilters) {
-            BusinessFiltersView(filter: $adminVM.businessFilter)
-                .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showingAddBusiness) {
-            // AddBusinessView would go here
-            Text("Add Business Form")
+            BusinessFiltersView()
+                .environmentObject(adminVM)
         }
         .alert("Delete Business", isPresented: $showingDeleteConfirmation, presenting: businessToDelete) { business in
             Button("Cancel", role: .cancel) {}
@@ -93,35 +80,28 @@ struct BusinessManagementView: View {
                 }
             }
         } message: { business in
-            Text("Are you sure you want to delete \(business.name)? This will also delete all reviews, bookings, and associated data. This action cannot be undone.")
+            Text("Are you sure you want to delete '\(business.name)'? This will also delete all reviews, bookings, and associated data. This action cannot be undone.")
         }
     }
     
-    // MARK: - Toolbar Section
+    // MARK: - Toolbar
     
     private var toolbarSection: some View {
         HStack(spacing: 12) {
-            // Select All
             if !sortedBusinesses.isEmpty {
-                Button(action: {
-                    if selectedBusinesses.count == sortedBusinesses.count {
-                        selectedBusinesses.removeAll()
-                    } else {
-                        selectedBusinesses = Set(sortedBusinesses.compactMap { $0.id })
-                    }
-                }) {
+                Button(action: toggleSelectAll) {
                     HStack(spacing: 6) {
                         Image(systemName: selectedBusinesses.isEmpty ? "square" : "checkmark.square.fill")
-                        Text(selectedBusinesses.isEmpty ? "Select All" : "Deselect All")
+                        Text(selectedBusinesses.isEmpty ? "Select All" : "Deselect")
                             .font(.subheadline)
                             .fontWeight(.medium)
                     }
                 }
+                .buttonStyle(.plain)
             }
             
             Spacer()
             
-            // Sort Menu
             Menu {
                 ForEach(SortOption.allCases, id: \.self) { option in
                     Button(action: { sortOption = option }) {
@@ -142,7 +122,6 @@ struct BusinessManagementView: View {
                 }
             }
             
-            // Filters Button
             Button(action: { showingFilters = true }) {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
@@ -158,7 +137,6 @@ struct BusinessManagementView: View {
                 }
             }
             
-            // Export Button
             Button(action: { showingExport = true }) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.subheadline)
@@ -168,18 +146,13 @@ struct BusinessManagementView: View {
                     ShareSheet(items: [url])
                 }
             }
-            
-            // Add Business Button
-            ActionButton(icon: "plus", title: "Add", color: .blue) {
-                showingAddBusiness = true
-            }
         }
         .padding()
         .background(Color(.systemBackground))
         .shadow(color: .black.opacity(0.05), radius: 2, y: 2)
     }
     
-    // MARK: - Search Section
+    // MARK: - Search
     
     private var searchSection: some View {
         VStack(spacing: 12) {
@@ -187,11 +160,7 @@ struct BusinessManagementView: View {
                 searchText: $adminVM.businessFilter.searchText,
                 placeholder: "Search businesses, categories, cities..."
             )
-            .onChange(of: adminVM.businessFilter.searchText) { _ in
-                adminVM.applyBusinessFilter()
-            }
             
-            // Bulk Actions (when items selected)
             if !selectedBusinesses.isEmpty {
                 HStack(spacing: 12) {
                     Text("\(selectedBusinesses.count) selected")
@@ -227,7 +196,7 @@ struct BusinessManagementView: View {
         .padding(.vertical, 12)
     }
     
-    // MARK: - Active Filters Section
+    // MARK: - Active Filters
     
     private var activeFiltersSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -235,34 +204,29 @@ struct BusinessManagementView: View {
                 if let category = adminVM.businessFilter.category {
                     FilterTag(text: "Category: \(category)") {
                         adminVM.businessFilter.category = nil
-                        adminVM.applyBusinessFilter()
                     }
                 }
                 
                 if let city = adminVM.businessFilter.city {
                     FilterTag(text: "City: \(city)") {
                         adminVM.businessFilter.city = nil
-                        adminVM.applyBusinessFilter()
                     }
                 }
                 
                 if let rating = adminVM.businessFilter.rating {
-                    FilterTag(text: "Rating: \(String(rating))+ stars") {
+                    FilterTag(text: "Rating: \(rating)+ stars") {
                         adminVM.businessFilter.rating = nil
-                        adminVM.applyBusinessFilter()
                     }
                 }
                 
                 if let claimStatus = adminVM.businessFilter.claimStatus {
                     FilterTag(text: "Status: \(claimStatus)") {
                         adminVM.businessFilter.claimStatus = nil
-                        adminVM.applyBusinessFilter()
                     }
                 }
                 
                 Button(action: {
                     adminVM.businessFilter.reset()
-                    adminVM.applyBusinessFilter()
                 }) {
                     Text("Clear All")
                         .font(.caption)
@@ -281,7 +245,7 @@ struct BusinessManagementView: View {
         .padding(.vertical, 8)
     }
     
-    // MARK: - Business List Section
+    // MARK: - Business List
     
     private var businessListSection: some View {
         ScrollView {
@@ -290,26 +254,19 @@ struct BusinessManagementView: View {
                     BusinessRow(
                         business: business,
                         isSelected: selectedBusinesses.contains(business.id ?? ""),
-                        onSelect: {
-                            guard let businessId = business.id else { return }
-                            if selectedBusinesses.contains(businessId) {
-                                selectedBusinesses.remove(businessId)
-                            } else {
-                                selectedBusinesses.insert(businessId)
-                            }
-                        },
+                        onSelect: { toggleSelection(for: business) },
                         onDelete: {
                             businessToDelete = business
                             showingDeleteConfirmation = true
                         },
-                        onSuspend: {
-                            businessToSuspend = business
-                            showingSuspendDialog = true
-                        },
-                        onFeature: {
+                        onToggleFeature: {
                             Task {
-                                // Toggle featured status
-                                try? await adminVM.featureBusiness(business, featured: true)
+                                try? await adminVM.toggleBusinessFeature(business)
+                            }
+                        },
+                        onToggleSuspension: {
+                            Task {
+                                try? await adminVM.toggleBusinessSuspension(business)
                             }
                         }
                     )
@@ -319,55 +276,76 @@ struct BusinessManagementView: View {
         }
     }
     
-    // MARK: - Bulk Actions
+    // MARK: - Actions
+    
+    private func toggleSelectAll() {
+        if selectedBusinesses.count == sortedBusinesses.count {
+            selectedBusinesses.removeAll()
+        } else {
+            selectedBusinesses = Set(sortedBusinesses.compactMap { $0.id })
+        }
+    }
+    
+    private func toggleSelection(for business: Business) {
+        guard let id = business.id else { return }
+        if selectedBusinesses.contains(id) {
+            selectedBusinesses.remove(id)
+        } else {
+            selectedBusinesses.insert(id)
+        }
+    }
     
     private func bulkDelete() {
         let businesses = sortedBusinesses.filter { business in
-            guard let businessId = business.id else { return false }
-            return selectedBusinesses.contains(businessId)
+            guard let id = business.id else { return false }
+            return selectedBusinesses.contains(id)
         }
+        
         Task {
-            try? await adminVM.bulkDeleteBusinesses(businesses)
+            let result = await adminVM.performBulkOperation(
+                items: businesses,
+                operation: { try await adminVM.deleteBusiness($0) },
+                operationName: "Delete Businesses"
+            )
             selectedBusinesses.removeAll()
         }
     }
     
     private func bulkFeature() {
         let businesses = sortedBusinesses.filter { business in
-            guard let businessId = business.id else { return false }
-            return selectedBusinesses.contains(businessId)
+            guard let id = business.id else { return false }
+            return selectedBusinesses.contains(id)
         }
+        
         Task {
             for business in businesses {
-                try? await adminVM.featureBusiness(business, featured: true)
+                try? await adminVM.toggleBusinessFeature(business)
             }
             selectedBusinesses.removeAll()
         }
     }
 }
 
-// MARK: - Business Row Component
+// MARK: - Business Row
 
 struct BusinessRow: View {
     let business: Business
     let isSelected: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
-    let onSuspend: () -> Void
-    let onFeature: () -> Void
+    let onToggleFeature: () -> Void
+    let onToggleSuspension: () -> Void
     
     var body: some View {
         HStack(spacing: 12) {
-            // Selection Checkbox
             Button(action: onSelect) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundColor(isSelected ? .blue : .secondary)
             }
+            .buttonStyle(.plain)
             
-            // Business Image
-            if let photoURL = business.photoURLs.first,
-               let url = URL(string: photoURL) {
+            if let photoURL = business.photoURLs.first, let url = URL(string: photoURL) {
                 AsyncImage(url: url) { image in
                     image
                         .resizable()
@@ -387,7 +365,6 @@ struct BusinessRow: View {
                     )
             }
             
-            // Business Info
             VStack(alignment: .leading, spacing: 6) {
                 Text(business.name)
                     .font(.headline)
@@ -424,7 +401,7 @@ struct BusinessRow: View {
                         AdminStatusBadge(text: "Claimable", color: .green)
                     }
                     
-                    if business.claimStatus == "claimed" {
+                    if business.isClaimed {
                         AdminStatusBadge(text: "Claimed", color: .blue)
                     }
                 }
@@ -432,22 +409,13 @@ struct BusinessRow: View {
             
             Spacer()
             
-            // Actions Menu
             Menu {
-                Button(action: {}) {
-                    Label("View Details", systemImage: "eye")
+                Button(action: onToggleFeature) {
+                    Label(business.featured ? "Unfeature" : "Feature", systemImage: "star")
                 }
                 
-                Button(action: {}) {
-                    Label("Edit", systemImage: "pencil")
-                }
-                
-                Button(action: onFeature) {
-                    Label("Feature", systemImage: "star")
-                }
-                
-                Button(action: onSuspend) {
-                    Label("Suspend", systemImage: "hand.raised")
+                Button(action: onToggleSuspension) {
+                    Label(business.suspended ? "Unsuspend" : "Suspend", systemImage: "hand.raised")
                 }
                 
                 Divider()
@@ -471,7 +439,7 @@ struct BusinessRow: View {
     }
 }
 
-// MARK: - Filter Tag Component
+// MARK: - Filter Tag
 
 struct FilterTag: View {
     let text: String
@@ -498,43 +466,42 @@ struct FilterTag: View {
     }
 }
 
-// MARK: - Business Filters View
+// MARK: - Filters View
 
 struct BusinessFiltersView: View {
-    @Binding var filter: AdminFilter
-    @Environment(\.dismiss) var dismiss
     @EnvironmentObject var adminVM: AdminViewModel
+    @Environment(\.dismiss) var dismiss
     
     var body: some View {
         NavigationView {
             Form {
                 Section("Category") {
-                    Picker("Select Category", selection: $filter.category) {
+                    Picker("Select Category", selection: $adminVM.businessFilter.category) {
                         Text("All Categories").tag(nil as String?)
-                        ForEach(adminVM.getCategories().compactMap { $0 }, id: \.self) { category in
+                        ForEach(adminVM.getCategories(), id: \.self) { category in
                             Text(category).tag(Optional(category))
                         }
                     }
                 }
                 
                 Section("Location") {
-                    Picker("City", selection: $filter.city) {
+                    Picker("City", selection: $adminVM.businessFilter.city) {
                         Text("All Cities").tag(nil as String?)
-                        ForEach(adminVM.getCities().compactMap { $0 }, id: \.self) { city in
+                        ForEach(adminVM.getCities(), id: \.self) { city in
                             Text(city).tag(Optional(city))
                         }
                     }
                     
-                    Picker("Country", selection: $filter.country) {
+                    Picker("Country", selection: $adminVM.businessFilter.country) {
                         Text("All Countries").tag(nil as String?)
-                        ForEach(adminVM.getCountries().compactMap { $0 }, id: \.self) { country in
+                        ForEach(adminVM.getCountries(), id: \.self) { country in
                             Text(country).tag(Optional(country))
                         }
                     }
                 }
                 
                 Section("Rating") {
-                    Picker("Minimum Rating", selection: $filter.rating) {
+                    Picker("Minimum Rating", selection: $adminVM.businessFilter.rating) {
                         Text("Any Rating").tag(nil as Int?)
                         ForEach(1...5, id: \.self) { rating in
                             Text("\(rating)+ stars").tag(Optional(rating))
@@ -543,7 +510,7 @@ struct BusinessFiltersView: View {
                 }
                 
                 Section("Claim Status") {
-                    Picker("Status", selection: $filter.claimStatus) {
+                    Picker("Status", selection: $adminVM.businessFilter.claimStatus) {
                         Text("All").tag(nil as String?)
                         Text("Claimable").tag(Optional("claimable"))
                         Text("Claimed").tag(Optional("claimed"))
@@ -556,14 +523,12 @@ struct BusinessFiltersView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Reset") {
-                        filter.reset()
-                        adminVM.applyBusinessFilter()
+                        adminVM.businessFilter.reset()
                     }
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply") {
-                        adminVM.applyBusinessFilter()
+                    Button("Done") {
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -571,4 +536,16 @@ struct BusinessFiltersView: View {
             }
         }
     }
+}
+
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

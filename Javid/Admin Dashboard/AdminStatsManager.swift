@@ -1,33 +1,49 @@
+//
+//  AdminStatsManager.swift
+//  Javid Admin Panel
+//
+//  Improved statistics manager with caching and performance optimization
+//
+
 import Foundation
 import Combine
 import FirebaseFirestore
 
+@MainActor
 class AdminStatsManager: ObservableObject {
+    
+    // MARK: - Dependencies
+    
     private let db = Firestore.firestore()
+    
+    // MARK: - Published Properties
     
     @Published var stats = AdminStats()
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    // Cache for statistics (5 minute expiry)
+    // MARK: - Cache Properties
+    
     private var lastFetchTime: Date?
     private let cacheExpiry: TimeInterval = 300 // 5 minutes
+    private var cachedChartData: [String: Any] = [:]
     
-    /// Fetch all dashboard statistics
-    func fetchAllStats() async {
+    // MARK: - Statistics Fetching
+    
+    /// Fetch all dashboard statistics with caching
+    func fetchAllStats(forceRefresh: Bool = false) async {
         // Check cache
-        if let lastFetch = lastFetchTime,
+        if !forceRefresh,
+           let lastFetch = lastFetchTime,
            Date().timeIntervalSince(lastFetch) < cacheExpiry {
             return // Use cached data
         }
         
-        await MainActor.run {
-            isLoading = true
-            errorMessage = nil
-        }
+        isLoading = true
+        errorMessage = nil
         
         do {
-            // Fetch all counts in parallel
+            // Fetch all statistics in parallel
             async let businesses = fetchBusinessCount()
             async let users = fetchUserCount()
             async let reviews = fetchReviewCount()
@@ -40,194 +56,194 @@ class AdminStatsManager: ObservableObject {
             async let jobs = fetchActiveJobs()
             
             // Calculate trends
-            async let businessTrend = calculateBusinessTrend()
-            async let userTrend = calculateUserTrend()
-            async let reviewTrend = calculateReviewTrend()
+            async let businessTrend = calculateTrend(collection: "businesses")
+            async let userTrend = calculateTrend(collection: "users")
+            async let reviewTrend = calculateTrend(collection: "reviews")
+            async let bookingTrend = calculateTrend(collection: "bookings")
             
-            // Wait for all results
-            let (bizCount, userCount, reviewCount, claimCount, bookingCount,
-                 todayBiz, todayUser, todayRev, marketCount, jobCount,
-                 bizTrend, usrTrend, revTrend) = try await (
+            // Additional metrics
+            async let avgRating = calculateAverageRating()
+            async let suspendedUsers = fetchSuspendedCount(collection: "users")
+            async let suspendedBusinesses = fetchSuspendedCount(collection: "businesses")
+            
+            // Await all results
+            let results = try await (
                 businesses, users, reviews, claims, bookings,
                 todayBusinesses, todayUsers, todayReviews, marketplace, jobs,
-                businessTrend, userTrend, reviewTrend
+                businessTrend, userTrend, reviewTrend, bookingTrend,
+                avgRating, suspendedUsers, suspendedBusinesses
             )
             
-            await MainActor.run {
-                stats.totalBusinesses = bizCount
-                stats.totalUsers = userCount
-                stats.totalReviews = reviewCount
-                stats.pendingClaims = claimCount
-                stats.activeBookings = bookingCount
-                stats.todayNewBusinesses = todayBiz
-                stats.todayNewUsers = todayUser
-                stats.todayNewReviews = todayRev
-                stats.activeMarketplaceListings = marketCount
-                stats.activeJobPostings = jobCount
-                stats.businessTrend = bizTrend
-                stats.userTrend = usrTrend
-                stats.reviewTrend = revTrend
-                
-                isLoading = false
-                lastFetchTime = Date()
-            }
+            // Update stats
+            stats.totalBusinesses = results.0
+            stats.totalUsers = results.1
+            stats.totalReviews = results.2
+            stats.pendingClaims = results.3
+            stats.activeBookings = results.4
+            stats.todayNewBusinesses = results.5
+            stats.todayNewUsers = results.6
+            stats.todayNewReviews = results.7
+            stats.activeMarketplaceListings = results.8
+            stats.activeJobPostings = results.9
+            stats.businessTrend = results.10
+            stats.userTrend = results.11
+            stats.reviewTrend = results.12
+            stats.bookingTrend = results.13
+            stats.averageRating = results.14
+            stats.suspendedUsers = results.15
+            stats.suspendedBusinesses = results.16
+            
+            isLoading = false
+            lastFetchTime = Date()
+            
         } catch {
-            await MainActor.run {
-                errorMessage = "Failed to load statistics: \(error.localizedDescription)"
-                isLoading = false
-            }
+            errorMessage = "Failed to load statistics: \(error.localizedDescription)"
+            isLoading = false
         }
     }
     
     // MARK: - Individual Stat Fetchers
     
     private func fetchBusinessCount() async throws -> Int {
-        let snapshot = try await db.collection("businesses").getDocuments()
-        return snapshot.documents.count
+        let snapshot = try await db.collection("businesses").count.getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchUserCount() async throws -> Int {
-        let snapshot = try await db.collection("users").getDocuments()
-        return snapshot.documents.count
+        let snapshot = try await db.collection("users").count.getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchReviewCount() async throws -> Int {
-        let snapshot = try await db.collection("reviews").getDocuments()
-        return snapshot.documents.count
+        let snapshot = try await db.collection("reviews").count.getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchPendingClaimCount() async throws -> Int {
         let snapshot = try await db.collection("business_claims")
             .whereField("status", isEqualTo: "pending")
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchActiveBookingCount() async throws -> Int {
         let snapshot = try await db.collection("bookings")
             .whereField("status", in: ["pending", "confirmed"])
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchTodayNewBusinesses() async throws -> Int {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        
+        let startOfDay = Calendar.current.startOfDay(for: Date())
         let snapshot = try await db.collection("businesses")
             .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchTodayNewUsers() async throws -> Int {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        
+        let startOfDay = Calendar.current.startOfDay(for: Date())
         let snapshot = try await db.collection("users")
             .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchTodayNewReviews() async throws -> Int {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        
+        let startOfDay = Calendar.current.startOfDay(for: Date())
         let snapshot = try await db.collection("reviews")
             .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchActiveMarketplaceItems() async throws -> Int {
         let snapshot = try await db.collection("marketplace_items")
             .whereField("status", isEqualTo: "active")
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     private func fetchActiveJobs() async throws -> Int {
         let snapshot = try await db.collection("jobs")
             .whereField("status", isEqualTo: "active")
             .whereField("expiresAt", isGreaterThan: Timestamp(date: Date()))
-            .getDocuments()
-        return snapshot.documents.count
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
+    }
+    
+    private func fetchSuspendedCount(collection: String) async throws -> Int {
+        let snapshot = try await db.collection(collection)
+            .whereField("isSuspended", isEqualTo: true)
+            .count
+            .getAggregation(source: .server)
+        return Int(truncating: snapshot.count)
     }
     
     // MARK: - Trend Calculations
     
-    private func calculateBusinessTrend() async throws -> Double {
-        // Get count from last 30 days vs previous 30 days
+    private func calculateTrend(collection: String) async throws -> Double {
         let calendar = Calendar.current
         let now = Date()
-        let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now)!
-        let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: now)!
         
-        let recentSnapshot = try await db.collection("businesses")
+        guard let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now),
+              let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: now) else {
+            return 0.0
+        }
+        
+        // Recent period (last 30 days)
+        let recentSnapshot = try await db.collection(collection)
             .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: thirtyDaysAgo))
-            .getDocuments()
+            .count
+            .getAggregation(source: .server)
         
-        let previousSnapshot = try await db.collection("businesses")
+        // Previous period (30-60 days ago)
+        let previousSnapshot = try await db.collection(collection)
             .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: sixtyDaysAgo))
             .whereField("createdAt", isLessThan: Timestamp(date: thirtyDaysAgo))
-            .getDocuments()
+            .count
+            .getAggregation(source: .server)
         
-        let recentCount = Double(recentSnapshot.documents.count)
-        let previousCount = Double(previousSnapshot.documents.count)
+        let recentCount = Double(truncating: recentSnapshot.count)
+        let previousCount = Double(truncating: previousSnapshot.count)
         
-        if previousCount == 0 { return recentCount > 0 ? 100.0 : 0.0 }
+        guard previousCount > 0 else {
+            return recentCount > 0 ? 100.0 : 0.0
+        }
+        
         return ((recentCount - previousCount) / previousCount) * 100.0
     }
     
-    private func calculateUserTrend() async throws -> Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now)!
-        let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: now)!
-        
-        let recentSnapshot = try await db.collection("users")
-            .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: thirtyDaysAgo))
+    private func calculateAverageRating() async throws -> Double {
+        let snapshot = try await db.collection("businesses")
             .getDocuments()
         
-        let previousSnapshot = try await db.collection("users")
-            .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: sixtyDaysAgo))
-            .whereField("createdAt", isLessThan: Timestamp(date: thirtyDaysAgo))
-            .getDocuments()
+        let ratings = snapshot.documents.compactMap { doc -> Double? in
+            doc.data()["rating"] as? Double
+        }
         
-        let recentCount = Double(recentSnapshot.documents.count)
-        let previousCount = Double(previousSnapshot.documents.count)
-        
-        if previousCount == 0 { return recentCount > 0 ? 100.0 : 0.0 }
-        return ((recentCount - previousCount) / previousCount) * 100.0
-    }
-    
-    private func calculateReviewTrend() async throws -> Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now)!
-        let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: now)!
-        
-        let recentSnapshot = try await db.collection("reviews")
-            .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: thirtyDaysAgo))
-            .getDocuments()
-        
-        let previousSnapshot = try await db.collection("reviews")
-            .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: sixtyDaysAgo))
-            .whereField("createdAt", isLessThan: Timestamp(date: thirtyDaysAgo))
-            .getDocuments()
-        
-        let recentCount = Double(recentSnapshot.documents.count)
-        let previousCount = Double(previousSnapshot.documents.count)
-        
-        if previousCount == 0 { return recentCount > 0 ? 100.0 : 0.0 }
-        return ((recentCount - previousCount) / previousCount) * 100.0
+        guard !ratings.isEmpty else { return 0.0 }
+        return ratings.reduce(0.0, +) / Double(ratings.count)
     }
     
     // MARK: - Chart Data Fetchers
     
     /// Fetch business growth data for the last 12 months
     func fetchBusinessGrowthData() async throws -> [BusinessGrowthData] {
+        // Check cache
+        if let cached = cachedChartData["businessGrowth"] as? [BusinessGrowthData],
+           let lastFetch = lastFetchTime,
+           Date().timeIntervalSince(lastFetch) < cacheExpiry {
+            return cached
+        }
+        
         let calendar = Calendar.current
         let now = Date()
         var data: [BusinessGrowthData] = []
@@ -241,20 +257,34 @@ class AdminStatsManager: ObservableObject {
             let snapshot = try await db.collection("businesses")
                 .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: startDate))
                 .whereField("createdAt", isLessThan: Timestamp(date: endDate))
-                .getDocuments()
+                .count
+                .getAggregation(source: .server)
             
             let formatter = DateFormatter()
             formatter.dateFormat = "MMM yyyy"
             let label = formatter.string(from: startDate)
             
-            data.append(BusinessGrowthData(date: startDate, count: snapshot.documents.count, label: label))
+            data.append(BusinessGrowthData(
+                date: startDate,
+                count: Int(truncating: snapshot.count),
+                label: label
+            ))
         }
         
+        // Cache the result
+        cachedChartData["businessGrowth"] = data
         return data
     }
     
     /// Fetch category distribution data
     func fetchCategoryDistribution() async throws -> [CategoryDistribution] {
+        // Check cache
+        if let cached = cachedChartData["categoryDistribution"] as? [CategoryDistribution],
+           let lastFetch = lastFetchTime,
+           Date().timeIntervalSince(lastFetch) < cacheExpiry {
+            return cached
+        }
+        
         let snapshot = try await db.collection("businesses").getDocuments()
         
         var categoryCounts: [String: Int] = [:]
@@ -265,17 +295,28 @@ class AdminStatsManager: ObservableObject {
         }
         
         let total = Double(snapshot.documents.count)
-        return categoryCounts.map { category, count in
+        let data = categoryCounts.map { category, count in
             CategoryDistribution(
                 category: category,
                 count: count,
                 percentage: total > 0 ? (Double(count) / total) * 100.0 : 0.0
             )
         }.sorted { $0.count > $1.count }
+        
+        // Cache the result
+        cachedChartData["categoryDistribution"] = data
+        return data
     }
     
     /// Fetch geographic distribution data
     func fetchGeographicDistribution() async throws -> [GeographicData] {
+        // Check cache
+        if let cached = cachedChartData["geographicData"] as? [GeographicData],
+           let lastFetch = lastFetchTime,
+           Date().timeIntervalSince(lastFetch) < cacheExpiry {
+            return cached
+        }
+        
         let snapshot = try await db.collection("businesses").getDocuments()
         
         var cityCounts: [String: (count: Int, ids: [String])] = [:]
@@ -288,9 +329,13 @@ class AdminStatsManager: ObservableObject {
             }
         }
         
-        return cityCounts.map { city, data in
+        let data = cityCounts.map { city, data in
             GeographicData(location: city, count: data.count, businesses: data.ids)
         }.sorted { $0.count > $1.count }
+        
+        // Cache the result
+        cachedChartData["geographicData"] = data
+        return data
     }
     
     /// Fetch top rated businesses
@@ -319,8 +364,57 @@ class AdminStatsManager: ObservableObject {
         }
     }
     
-    /// Clear cache to force refresh
+    /// Fetch user activity data for the last 30 days
+    func fetchUserActivityData() async throws -> [UserActivityData] {
+        let calendar = Calendar.current
+        let now = Date()
+        var data: [UserActivityData] = []
+        
+        for daysAgo in (0..<30).reversed() {
+            guard let date = calendar.date(byAdding: .day, value: -daysAgo, to: now),
+                  let startOfDay = calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date),
+                  let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: date) else {
+                continue
+            }
+            
+            // New users
+            let newUsersSnapshot = try await db.collection("users")
+                .whereField("createdAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
+                .whereField("createdAt", isLessThanOrEqualTo: Timestamp(date: endOfDay))
+                .count
+                .getAggregation(source: .server)
+            
+            // Active users (those who logged in)
+            let activeUsersSnapshot = try await db.collection("users")
+                .whereField("lastLoginAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
+                .whereField("lastLoginAt", isLessThanOrEqualTo: Timestamp(date: endOfDay))
+                .count
+                .getAggregation(source: .server)
+            
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d"
+            let label = formatter.string(from: date)
+            
+            data.append(UserActivityData(
+                date: date,
+                newUsers: Int(truncating: newUsersSnapshot.count),
+                activeUsers: Int(truncating: activeUsersSnapshot.count),
+                label: label
+            ))
+        }
+        
+        return data
+    }
+    
+    // MARK: - Cache Management
+    
     func clearCache() {
         lastFetchTime = nil
+        cachedChartData.removeAll()
+    }
+    
+    func refreshStats() async {
+        clearCache()
+        await fetchAllStats(forceRefresh: true)
     }
 }

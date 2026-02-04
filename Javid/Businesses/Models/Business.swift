@@ -24,6 +24,9 @@ struct Business: Identifiable, Codable {
     var socialMedia: SocialMedia? = nil
     var bookingEnabled: Bool = false
     
+    var featured: Bool
+    var suspended: Bool
+    
     // MARK: - Claim System Fields
     var isClaimable: Bool = false              // Only admin-created businesses are claimable
     var claimStatus: String? = nil             // "unclaimed", "pending", "claimed"
@@ -39,7 +42,7 @@ struct Business: Identifiable, Codable {
     }
     
     // Updated initializer with all fields
-    init(id: String = UUID().uuidString, name: String, category: String, description: String, phone: String, address: String, city: String, country: String, latitude: Double, longitude: Double, ownerId: String, photoURLs: [String] = [], rating: Double = 0.0, reviewCount: Int = 0, workHours: WorkHours? = nil, amenities: [String]? = nil, socialMedia: SocialMedia? = nil, bookingEnabled: Bool = false, isClaimable: Bool = false, claimStatus: String? = nil, claimedBy: String? = nil, claimedAt: Date? = nil, claimApprovedBy: String? = nil, ownershipHistory: [OwnershipRecord]? = nil) {
+    init(id: String = UUID().uuidString, name: String, category: String, description: String, phone: String, address: String, city: String, country: String, latitude: Double, longitude: Double, ownerId: String, photoURLs: [String] = [], rating: Double = 0.0, reviewCount: Int = 0, workHours: WorkHours? = nil, amenities: [String]? = nil, socialMedia: SocialMedia? = nil, bookingEnabled: Bool = false, featured: Bool = false, suspended: Bool = false, isClaimable: Bool = false, claimStatus: String? = nil, claimedBy: String? = nil, claimedAt: Date? = nil, claimApprovedBy: String? = nil, ownershipHistory: [OwnershipRecord]? = nil) {
         self.id = id
         self.name = name
         self.category = category
@@ -58,6 +61,8 @@ struct Business: Identifiable, Codable {
         self.amenities = amenities
         self.socialMedia = socialMedia
         self.bookingEnabled = bookingEnabled
+        self.featured = featured
+        self.suspended = suspended
         self.isClaimable = isClaimable
         self.claimStatus = claimStatus
         self.claimedBy = claimedBy
@@ -230,3 +235,4 @@ extension Business {
         }
     }
 }
+

@@ -1,8 +1,15 @@
+//
+//  ClaimManagementView.swift
+//  Javid Admin Panel
+//
+//  Complete claim management with review workflow
+//
+
 import SwiftUI
 
 struct ClaimManagementView: View {
     @EnvironmentObject var adminVM: AdminViewModel
-    @State private var selectedStatus: ClaimStatus? = .pending
+    @State private var selectedStatus: BusinessClaimStatus? = .pending
     @State private var showingClaimDetail: BusinessClaim?
     @State private var sortBy: ClaimSortOption = .submittedDate
     
@@ -55,11 +62,14 @@ struct ClaimManagementView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Business Claims")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(item: $showingClaimDetail) { claim in
             ClaimReviewView(claim: claim)
                 .environmentObject(adminVM)
         }
     }
+    
+    // MARK: - Status Filter
     
     private var statusFilterSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -107,6 +117,15 @@ struct ClaimManagementView: View {
                 ) {
                     selectedStatus = .rejected
                 }
+                
+                ClaimStatusTab(
+                    title: "Cancelled",
+                    count: adminVM.allClaims.filter { $0.status == .cancelled }.count,
+                    isSelected: selectedStatus == .cancelled,
+                    color: .gray
+                ) {
+                    selectedStatus = .cancelled
+                }
             }
             .padding(.horizontal)
         }
@@ -114,15 +133,14 @@ struct ClaimManagementView: View {
         .background(Color(.systemBackground))
     }
     
+    // MARK: - Search & Sort
+    
     private var searchSortSection: some View {
         HStack(spacing: 12) {
             AdminSearchBar(
                 searchText: $adminVM.claimFilter.searchText,
                 placeholder: "Search claims..."
             )
-            .onChange(of: adminVM.claimFilter.searchText) { _ in
-                adminVM.applyClaimFilter()
-            }
             
             Menu {
                 ForEach(ClaimSortOption.allCases, id: \.self) { option in
@@ -149,6 +167,8 @@ struct ClaimManagementView: View {
         .padding(.vertical, 12)
     }
     
+    // MARK: - Claims List
+    
     private var claimsListSection: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
@@ -161,9 +181,34 @@ struct ClaimManagementView: View {
             .padding()
         }
     }
+    
+    private func colorForStatus(_ status: BusinessClaimStatus) -> Color {
+        switch status {
+        case .pending:
+            return .orange
+        case .underReview:
+            return .blue
+        case .approved:
+            return .green
+        case .rejected:
+            return .red
+        case .cancelled:
+            return .gray
+        }
+    }
+    
+    private func displayNameForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending: return "Pending"
+        case .underReview: return "Under Review"
+        case .approved: return "Approved"
+        case .rejected: return "Rejected"
+        case .cancelled: return "Cancelled"
+        }
+    }
 }
 
-// MARK: - Status Tab Component (Renamed to avoid conflict)
+// MARK: - Status Tab
 
 struct ClaimStatusTab: View {
     let title: String
@@ -174,7 +219,7 @@ struct ClaimStatusTab: View {
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Text(title)
                         .font(.subheadline)
@@ -184,12 +229,9 @@ struct ClaimStatusTab: View {
                         .font(.caption)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isSelected ? color : Color.secondary)
-                        )
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(isSelected ? color : Color.secondary))
                 }
                 .foregroundColor(isSelected ? color : .secondary)
                 
@@ -201,18 +243,18 @@ struct ClaimStatusTab: View {
                 }
             }
         }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Claim Card Component (Renamed to avoid conflict)
+// MARK: - Claim Card
 
 struct AdminClaimCard: View {
     let claim: BusinessClaim
     let onTap: () -> Void
     
     private var isPriority: Bool {
-        let daysSinceSubmission = Calendar.current.dateComponents([.day], from: claim.submittedAt, to: Date()).day ?? 0
-        return daysSinceSubmission > 5 && claim.status == .pending
+        claim.daysSinceSubmission > 5 && claim.status == .pending
     }
     
     var body: some View {
@@ -232,7 +274,7 @@ struct AdminClaimCard: View {
                     Spacer()
                     
                     AdminStatusBadge(
-                        text: claim.status.displayName,
+                        text: displayNameForStatus(claim.status),
                         color: colorForStatus(claim.status)
                     )
                 }
@@ -242,11 +284,21 @@ struct AdminClaimCard: View {
                     ClaimDetailRow(icon: "calendar", text: formatDate(claim.submittedAt))
                     ClaimDetailRow(icon: "doc.fill", text: "\(claim.verificationDocuments.count) documents")
                     
+                    if claim.emailVerified {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundColor(.green)
+                            Text("Email Verified")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+                    }
+                    
                     if isPriority {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption)
-                            Text("Pending for \(daysSince(claim.submittedAt)) days")
+                            Text("Pending for \(claim.daysSinceSubmission) days")
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         }
@@ -287,7 +339,7 @@ struct AdminClaimCard: View {
         .buttonStyle(.plain)
     }
     
-    private func colorForStatus(_ status: ClaimStatus) -> Color {
+    private func colorForStatus(_ status: BusinessClaimStatus) -> Color {
         switch status {
         case .pending:
             return .orange
@@ -302,19 +354,25 @@ struct AdminClaimCard: View {
         }
     }
     
+    private func displayNameForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending: return "Pending"
+        case .underReview: return "Under Review"
+        case .approved: return "Approved"
+        case .rejected: return "Rejected"
+        case .cancelled: return "Cancelled"
+        }
+    }
+    
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
-    
-    private func daysSince(_ date: Date) -> Int {
-        Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
-    }
 }
 
-// MARK: - Detail Row Component (Renamed to avoid conflict)
+// MARK: - Detail Row
 
 struct ClaimDetailRow: View {
     let icon: String
@@ -334,7 +392,7 @@ struct ClaimDetailRow: View {
     }
 }
 
-// MARK: - Claim Review Detail View
+// MARK: - Claim Review View
 
 struct ClaimReviewView: View {
     let claim: BusinessClaim
@@ -344,7 +402,6 @@ struct ClaimReviewView: View {
     @State private var showingApproveConfirmation = false
     @State private var showingRejectDialog = false
     @State private var rejectionReason = ""
-    @State private var adminNotes = ""
     @State private var isProcessing = false
     
     var body: some View {
@@ -359,8 +416,6 @@ struct ClaimReviewView: View {
                     if let notes = claim.additionalNotes, !notes.isEmpty {
                         notesSection(notes)
                     }
-                    
-                    adminNotesSection
                     
                     if !claim.auditTrail.isEmpty {
                         auditTrailSection
@@ -377,17 +432,13 @@ struct ClaimReviewView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
+                    Button("Close") { dismiss() }
                 }
             }
             .alert("Approve Claim", isPresented: $showingApproveConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Approve") {
-                    Task {
-                        await approveClaim()
-                    }
+                    Task { await approveClaim() }
                 }
             } message: {
                 Text("Are you sure you want to approve this claim? This will transfer business ownership to \(claim.claimantName).")
@@ -396,9 +447,7 @@ struct ClaimReviewView: View {
                 TextField("Rejection reason (required)", text: $rejectionReason)
                 Button("Cancel", role: .cancel) {}
                 Button("Reject", role: .destructive) {
-                    Task {
-                        await rejectClaim()
-                    }
+                    Task { await rejectClaim() }
                 }
                 .disabled(rejectionReason.isEmpty)
             } message: {
@@ -414,7 +463,7 @@ struct ClaimReviewView: View {
                 .font(.system(size: 48))
                 .foregroundColor(colorForStatus(claim.status))
             
-            Text(claim.status.displayName)
+            Text(displayNameForStatus(claim.status))
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -437,11 +486,11 @@ struct ClaimReviewView: View {
             AdminSectionHeader(title: "Business Information", icon: "building.2.fill")
             
             VStack(alignment: .leading, spacing: 12) {
-                ClaimInfoRow(label: "Business Name", value: claim.businessName)
-                ClaimInfoRow(label: "Business ID", value: claim.businessId)
+                AdminInfoRow(icon: "building.2", title: "Business Name", subtitle: claim.businessName)
+                AdminInfoRow(icon: "number", title: "Business ID", subtitle: claim.businessId)
                 
                 if let originalOwner = claim.originalOwnerName {
-                    ClaimInfoRow(label: "Current Owner", value: originalOwner)
+                    AdminInfoRow(icon: "person", title: "Original Owner", subtitle: originalOwner)
                 }
             }
             .padding()
@@ -457,11 +506,11 @@ struct ClaimReviewView: View {
             AdminSectionHeader(title: "Claimant Information", icon: "person.fill")
             
             VStack(alignment: .leading, spacing: 12) {
-                ClaimInfoRow(label: "Name", value: claim.claimantName)
-                ClaimInfoRow(label: "Email", value: claim.claimantEmail)
-                ClaimInfoRow(label: "User ID", value: claim.claimantId)
-                ClaimInfoRow(label: "Email Verified", value: claim.emailVerified ? "Yes" : "No")
-                ClaimInfoRow(label: "Submitted", value: formatDate(claim.submittedAt))
+                AdminInfoRow(icon: "person", title: "Name", subtitle: claim.claimantName)
+                AdminInfoRow(icon: "envelope", title: "Email", subtitle: claim.claimantEmail)
+                AdminInfoRow(icon: "number", title: "User ID", subtitle: claim.claimantId)
+                AdminInfoRow(icon: "checkmark.seal", title: "Email Verified", subtitle: claim.emailVerified ? "Yes" : "No")
+                AdminInfoRow(icon: "calendar", title: "Submitted", subtitle: claim.formattedSubmissionDate)
             }
             .padding()
             .background(
@@ -473,7 +522,7 @@ struct ClaimReviewView: View {
     
     private var documentsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            AdminSectionHeader(title: "Verification Documents", icon: "doc.fill")
+            AdminSectionHeader(title: "Verification Documents (\(claim.verificationDocuments.count))", icon: "doc.fill")
             
             if claim.verificationDocuments.isEmpty {
                 Text("No documents uploaded")
@@ -482,8 +531,8 @@ struct ClaimReviewView: View {
                     .padding()
             } else {
                 VStack(spacing: 12) {
-                    ForEach(claim.verificationDocuments, id: \.id) { doc in
-                        ClaimDocumentRow(document: doc)
+                    ForEach(claim.verificationDocuments) { doc in
+                        AdminDocumentRow(document: doc)
                     }
                 }
             }
@@ -504,57 +553,13 @@ struct ClaimReviewView: View {
         }
     }
     
-    private var adminNotesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            AdminSectionHeader(title: "Admin Notes (Internal)", icon: "note")
-            
-            TextEditor(text: $adminNotes)
-                .frame(minHeight: 100)
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
-                )
-        }
-    }
-    
     private var auditTrailSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             AdminSectionHeader(title: "Audit Trail", icon: "clock.arrow.circlepath")
             
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(claim.auditTrail, id: \.id) { entry in
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle()
-                            .fill(Color.blue)
-                            .frame(width: 8, height: 8)
-                            .padding(.top, 6)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.action.displayName)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            
-                            Text("By \(entry.performedByName)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            Text(formatDate(entry.timestamp))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            if let notes = entry.notes {
-                                Text(notes)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemGray6))
-                    )
+                ForEach(claim.auditTrail.sorted { $0.timestamp > $1.timestamp }) { entry in
+                    AuditEntryRow(entry: entry)
                 }
             }
         }
@@ -571,10 +576,7 @@ struct ClaimReviewView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.red)
-                    )
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.red))
                     .foregroundColor(.white)
                 }
                 
@@ -586,10 +588,7 @@ struct ClaimReviewView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.green)
-                    )
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.green))
                     .foregroundColor(.white)
                 }
             }
@@ -619,84 +618,56 @@ struct ClaimReviewView: View {
         isProcessing = false
     }
     
-    private func iconForStatus(_ status: ClaimStatus) -> String {
+    private func iconForStatus(_ status: BusinessClaimStatus) -> String {
         switch status {
-        case .pending:
-            return "clock.fill"
-        case .underReview:
-            return "eye.fill"
-        case .approved:
-            return "checkmark.circle.fill"
-        case .rejected:
-            return "xmark.circle.fill"
-        case .cancelled:
-            return "slash.circle.fill"
+        case .pending: return "clock.fill"
+        case .underReview: return "eye.fill"
+        case .approved: return "checkmark.circle.fill"
+        case .rejected: return "xmark.circle.fill"
+        case .cancelled: return "slash.circle.fill"
         }
     }
     
-    private func colorForStatus(_ status: ClaimStatus) -> Color {
+    private func colorForStatus(_ status: BusinessClaimStatus) -> Color {
         switch status {
-        case .pending:
-            return .orange
-        case .underReview:
-            return .blue
-        case .approved:
-            return .green
-        case .rejected:
-            return .red
-        case .cancelled:
-            return .gray
+        case .pending: return .orange
+        case .underReview: return .blue
+        case .approved: return .green
+        case .rejected: return .red
+        case .cancelled: return .gray
         }
     }
     
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-}
-
-// MARK: - Info Row Component (Renamed to avoid conflict)
-
-struct ClaimInfoRow: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Text(value)
-                .font(.body)
+    private func displayNameForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending: return "Pending"
+        case .underReview: return "Under Review"
+        case .approved: return "Approved"
+        case .rejected: return "Rejected"
+        case .cancelled: return "Cancelled"
         }
     }
 }
 
-// MARK: - Document Row Component (Renamed to avoid conflict + Fixed URL)
+// MARK: - Document Row
 
-struct ClaimDocumentRow: View {
+struct AdminDocumentRow: View {
     let document: ClaimVerificationDocument
     
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: documentIcon(for: document.documentType))
+            Image(systemName: document.documentType.icon)
                 .font(.title3)
                 .foregroundColor(.blue)
                 .frame(width: 40, height: 40)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.1))
-                )
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.1)))
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(document.documentType.displayName)
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 
-                Text("Uploaded \(timeAgo(from: document.uploadedAt))")
+                Text(document.formattedFileSize)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -704,7 +675,6 @@ struct ClaimDocumentRow: View {
             Spacer()
             
             Button(action: {
-                // ✅ FIXED: Use fileURL instead of documentURL
                 if let url = URL(string: document.fileURL) {
                     UIApplication.shared.open(url)
                 }
@@ -715,28 +685,50 @@ struct ClaimDocumentRow: View {
             }
         }
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
-        )
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
     }
+}
+
+// MARK: - Audit Entry Row
+
+struct AuditEntryRow: View {
+    let entry: AuditEntry
     
-    private func documentIcon(for type: ClaimVerificationDocument.DocumentType) -> String {
-        return type.icon
-    }
-    
-    private func timeAgo(from date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
-        
-        if seconds < 3600 {
-            let minutes = seconds / 60
-            return "\(minutes)m ago"
-        } else if seconds < 86400 {
-            let hours = seconds / 3600
-            return "\(hours)h ago"
-        } else {
-            let days = seconds / 86400
-            return "\(days)d ago"
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(Color.blue)
+                .frame(width: 8, height: 8)
+                .padding(.top, 6)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.action.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                Text("By \(entry.performedByName)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text(formatDate(entry.timestamp))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if let notes = entry.notes {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }

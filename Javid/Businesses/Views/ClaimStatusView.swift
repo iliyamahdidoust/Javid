@@ -74,8 +74,8 @@ struct ClaimStatusView: View {
         ScrollView {
             VStack(spacing: 16) {
                 ForEach(viewModel.claims) { claim in
-                    ClaimCard(claim: claim) {
-                        if claim.canBeCancelled {
+                    ClaimCardView(claim: claim) {
+                        if claim.status.isCancellable {
                             claimToCancel = claim
                             showingCancelConfirmation = true
                         }
@@ -98,7 +98,7 @@ struct ClaimStatusView: View {
 
 // MARK: - Claim Card Component
 
-struct ClaimCard: View {
+struct ClaimCardView: View {
     let claim: BusinessClaim
     let onCancelTapped: () -> Void
     
@@ -144,7 +144,7 @@ struct ClaimCard: View {
             }
             
             // Status Description
-            Text(claim.status.description)
+            Text(descriptionForStatus(claim.status))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
             
@@ -160,10 +160,10 @@ struct ClaimCard: View {
     
     private var statusBadge: some View {
         HStack(spacing: 6) {
-            Image(systemName: claim.status.icon)
+            Image(systemName: iconForStatus(claim.status))
                 .font(.caption)
             
-            Text(claim.status.displayName)
+            Text(displayNameForStatus(claim.status))
                 .font(.caption)
                 .fontWeight(.semibold)
         }
@@ -184,20 +184,56 @@ struct ClaimCard: View {
         }
     }
     
+    // MARK: - Helper Functions for BusinessClaimStatus
+    
+    private func displayNameForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending: return "Pending Review"
+        case .underReview: return "Under Review"
+        case .approved: return "Approved"
+        case .rejected: return "Rejected"
+        case .cancelled: return "Cancelled"
+        }
+    }
+    
+    private func iconForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending: return "clock.fill"
+        case .underReview: return "magnifyingglass.circle.fill"
+        case .approved: return "checkmark.seal.fill"
+        case .rejected: return "xmark.circle.fill"
+        case .cancelled: return "minus.circle.fill"
+        }
+    }
+    
+    private func descriptionForStatus(_ status: BusinessClaimStatus) -> String {
+        switch status {
+        case .pending:
+            return "Your claim has been submitted and is waiting for admin review."
+        case .underReview:
+            return "An administrator is currently reviewing your claim and verification documents."
+        case .approved:
+            return "Congratulations! Your claim has been approved and you are now the owner of this business."
+        case .rejected:
+            return "Your claim has been rejected. Please check the rejection reason and submit a new claim if needed."
+        case .cancelled:
+            return "This claim was cancelled before review completion."
+        }
+    }
+    
     // MARK: - Progress Indicator
     
     private var progressIndicator: some View {
         HStack(spacing: 0) {
-            ForEach(ClaimStatus.allCases.filter { !$0.isFinal || $0 == claim.status }, id: \.self) { status in
-                if status == .cancelled { EmptyView() }
-                else {
-                    progressStep(status: status)
-                }
+            let statuses: [BusinessClaimStatus] = [.pending, .underReview, .approved]
+            
+            ForEach(Array(statuses.enumerated()), id: \.offset) { index, status in
+                progressStep(status: status, isLast: index == statuses.count - 1)
             }
         }
     }
     
-    private func progressStep(status: ClaimStatus) -> some View {
+    private func progressStep(status: BusinessClaimStatus, isLast: Bool) -> some View {
         let isActive = statusIndex(claim.status) >= statusIndex(status)
         let isCurrent = claim.status == status
         
@@ -213,7 +249,7 @@ struct ClaimCard: View {
                 )
             
             // Line (if not last)
-            if status != ClaimStatus.allCases.last {
+            if !isLast {
                 Rectangle()
                     .fill(isActive ? statusColor.opacity(0.5) : Color.gray.opacity(0.3))
                     .frame(height: 2)
@@ -222,7 +258,7 @@ struct ClaimCard: View {
         }
     }
     
-    private func statusIndex(_ status: ClaimStatus) -> Int {
+    private func statusIndex(_ status: BusinessClaimStatus) -> Int {
         switch status {
         case .pending: return 0
         case .underReview: return 1
@@ -248,7 +284,7 @@ struct ClaimCard: View {
             
             Spacer()
             
-            if claim.canBeCancelled {
+            if claim.status.isCancellable {
                 Button(action: onCancelTapped) {
                     Text("Cancel Claim")
                         .font(.subheadline)

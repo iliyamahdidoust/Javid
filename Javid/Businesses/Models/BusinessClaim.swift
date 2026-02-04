@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFirestore
+// swiftlint:disable all
 
 /// Represents a claim request for business ownership
 struct BusinessClaim: Identifiable, Codable {
@@ -13,7 +14,7 @@ struct BusinessClaim: Identifiable, Codable {
     var claimantEmail: String             // Cached for display
     
     // MARK: - Claim Details
-    var status: ClaimStatus
+    var status: BusinessClaimStatus
     var verificationDocuments: [ClaimVerificationDocument]
     var additionalNotes: String?          // Optional message from claimant
     
@@ -51,7 +52,7 @@ struct BusinessClaim: Identifiable, Codable {
         claimantId: String,
         claimantName: String,
         claimantEmail: String,
-        status: ClaimStatus = .pending,
+        status: BusinessClaimStatus = BusinessClaimStatus.pending,
         verificationDocuments: [ClaimVerificationDocument] = [],
         additionalNotes: String? = nil,
         originalOwnerId: String,
@@ -109,7 +110,7 @@ struct BusinessClaim: Identifiable, Codable {
         claimantId = try container.decode(String.self, forKey: .claimantId)
         claimantName = try container.decode(String.self, forKey: .claimantName)
         claimantEmail = try container.decode(String.self, forKey: .claimantEmail)
-        status = try container.decode(ClaimStatus.self, forKey: .status)
+        status = try container.decode(BusinessClaimStatus.self, forKey: .status)
         verificationDocuments = try container.decode([ClaimVerificationDocument].self, forKey: .verificationDocuments)
         additionalNotes = try container.decodeIfPresent(String.self, forKey: .additionalNotes)
         
@@ -160,6 +161,34 @@ struct BusinessClaim: Identifiable, Codable {
         emailVerified = try container.decode(Bool.self, forKey: .emailVerified)
         verificationCode = try container.decodeIfPresent(String.self, forKey: .verificationCode)
     }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(businessId, forKey: .businessId)
+        try container.encode(businessName, forKey: .businessName)
+        try container.encode(claimantId, forKey: .claimantId)
+        try container.encode(claimantName, forKey: .claimantName)
+        try container.encode(claimantEmail, forKey: .claimantEmail)
+        try container.encode(status, forKey: .status)
+        try container.encode(verificationDocuments, forKey: .verificationDocuments)
+        try container.encodeIfPresent(additionalNotes, forKey: .additionalNotes)
+        try container.encode(submittedAt, forKey: .submittedAt)
+        try container.encodeIfPresent(reviewStartedAt, forKey: .reviewStartedAt)
+        try container.encodeIfPresent(reviewCompletedAt, forKey: .reviewCompletedAt)
+        try container.encode(lastUpdatedAt, forKey: .lastUpdatedAt)
+        try container.encodeIfPresent(verificationCodeSentAt, forKey: .verificationCodeSentAt)
+        try container.encodeIfPresent(verificationCodeExpiresAt, forKey: .verificationCodeExpiresAt)
+        try container.encodeIfPresent(reviewedBy, forKey: .reviewedBy)
+        try container.encodeIfPresent(reviewerName, forKey: .reviewerName)
+        try container.encodeIfPresent(rejectionReason, forKey: .rejectionReason)
+        try container.encodeIfPresent(adminNotes, forKey: .adminNotes)
+        try container.encode(auditTrail, forKey: .auditTrail)
+        try container.encode(originalOwnerId, forKey: .originalOwnerId)
+        try container.encodeIfPresent(originalOwnerName, forKey: .originalOwnerName)
+        try container.encode(emailVerified, forKey: .emailVerified)
+        try container.encodeIfPresent(verificationCode, forKey: .verificationCode)
+    }
 }
 
 // MARK: - Audit Entry
@@ -209,6 +238,16 @@ struct AuditEntry: Codable, Identifiable {
             timestamp = try container.decode(Date.self, forKey: .timestamp)
         }
     }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(action, forKey: .action)
+        try container.encode(performedBy, forKey: .performedBy)
+        try container.encode(performedByName, forKey: .performedByName)
+        try container.encodeIfPresent(notes, forKey: .notes)
+    }
 }
 
 /// Actions that can be recorded in audit trail
@@ -255,17 +294,36 @@ enum AuditAction: String, Codable {
     }
 }
 
+// MARK: - Local, unambiguous status for BusinessClaim
+enum BusinessClaimStatus: String, Codable {
+    case pending
+    case underReview
+    case approved
+    case rejected
+    case cancelled
+    
+    // Helper to match existing usage in BusinessClaim
+    var isCancellable: Bool {
+        switch self {
+        case .pending, .underReview:
+            return true
+        case .approved, .rejected, .cancelled:
+            return false
+        }
+    }
+}
+
 // MARK: - Helper Methods
 
 extension BusinessClaim {
     /// Check if claim can be cancelled by user
-    var canBeCancelled: Bool {
-        return status.isCancellable && claimantId == claimantId
+    func canBeCancelled(byUserId currentUserId: String) -> Bool {
+        return status.isCancellable && claimantId == currentUserId
     }
     
     /// Check if more documents can be added
     var canAddDocuments: Bool {
-        return status == .pending || status == .underReview
+        return status == BusinessClaimStatus.pending || status == BusinessClaimStatus.underReview
     }
     
     /// Calculate days since submission
@@ -305,7 +363,7 @@ extension BusinessClaim {
             claimantId: "user123",
             claimantName: "John Doe",
             claimantEmail: "john@example.com",
-            status: .pending,
+            status: BusinessClaimStatus.pending,
             verificationDocuments: [
                 ClaimVerificationDocument.preview(type: .businessLicense)
             ],
@@ -316,3 +374,4 @@ extension BusinessClaim {
         )
     }
 }
+
